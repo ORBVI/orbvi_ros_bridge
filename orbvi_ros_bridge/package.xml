@@ -18,6 +18,7 @@
   <depend>nav_msgs</depend>
   <depend>livox_ros_driver2</depend>
 
+  <build_depend>libboost-dev</build_depend>
   <build_depend>libopencv-dev</build_depend>
   <exec_depend>libopencv-dev</exec_depend>
 

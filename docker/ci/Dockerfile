@@ -77,10 +77,10 @@ RUN --mount=type=cache,id=orbvi-ros-bridge-ci-apt-cache,target=/var/cache/apt,sh
     dirmngr \
     file \
     gnupg2 \
+    libboost-dev \
     lsb-release \
     libgtest-dev \
-    libopencv-core-dev \
-    libopencv-imgproc-dev \
+    libopencv-dev \
     locales \
     pkg-config \
     python3-pip \

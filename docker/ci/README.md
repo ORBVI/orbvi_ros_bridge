@@ -1,15 +1,13 @@
 # ORBVI ROS Bridge CI Images
 
-This directory builds the Harbor CI images used by GitLab jobs. The images
+This directory builds the Docker images used by maintainer CI. The images
 preinstall Ubuntu 20.04 build tools, OpenCV, GTest and the matching ROS
-distribution so normal bridge CI jobs do not install large apt dependency sets
-at runtime.
+distribution so bridge test jobs do not install large apt dependency sets at
+runtime.
 
-Default image repository:
-
-```bash
-harbor.huanshizhineng.com:18803/omnisense/orbvi_ros_bridge_ci
-```
+The image repository and base image are controlled by `IMAGE_REPOSITORY` and
+`BASE_IMAGE`. Organization CI may override both values to use an internal
+registry or mirror.
 
 The build script creates two image tags for the current git short SHA when
 building multi-platform images manually:
@@ -47,21 +45,19 @@ PLATFORMS=linux/arm64 IMAGE_ARCH=arm64 ROS_TARGETS=ros1 docker/ci/build.sh
 PLATFORMS=linux/amd64 IMAGE_ARCH=amd64 ROS_TARGETS=ros2 docker/ci/build.sh
 ```
 
-Build and push the formal multi-platform images:
+Build and push formal multi-platform images:
 
 ```bash
-printf '%s' "$HARBOR_PASSWORD" | docker login harbor.huanshizhineng.com:18803 \
-  -u "$HARBOR_USERNAME" --password-stdin
-
-PUSH=1 docker/ci/build.sh
+IMAGE_REPOSITORY=<registry>/<project>/orbvi_ros_bridge_ci \
+  PUSH=1 docker/ci/build.sh
 ```
 
-If an image is built under a temporary local name, retag it into the Harbor
-`omnisense` project before pushing:
+If an image is built under a temporary local name, retag it into the target
+repository before pushing:
 
 ```bash
-docker tag SOURCE_IMAGE[:TAG] harbor.huanshizhineng.com:18803/omnisense/REPOSITORY[:TAG]
-docker push harbor.huanshizhineng.com:18803/omnisense/REPOSITORY[:TAG]
+docker tag SOURCE_IMAGE[:TAG] <registry>/<project>/REPOSITORY[:TAG]
+docker push <registry>/<project>/REPOSITORY[:TAG]
 ```
 
 The script refuses formal builds from a dirty worktree. For temporary local
@@ -73,28 +69,15 @@ ALLOW_DIRTY=1 PLATFORMS=linux/arm64 ROS_TARGETS=ros1 docker/ci/build.sh
 
 ## GitLab CI
 
-`.gitlab-ci.yml` builds and pushes four native images first. The ROS1 and ROS2
-test jobs then consume the exact commit and platform tag that was just pushed.
+`.gitlab-ci.yml` uses different flows for branch checks and release-line
+pushes:
 
-GitLab CI variables required for pushing to Harbor:
+- Merge request branches run the `docker:*:check` jobs. Each job builds its
+  native platform image with `PUSH=0`, then runs the ROS bridge tests inside
+  that local image with `docker/ci/run_bridge_tests_in_image.sh`.
+- Default-branch and tag pipelines run the push jobs. They build and push the
+  exact commit/platform image tag, then the ROS1 and ROS2 test jobs consume the
+  pushed image.
 
-```text
-HARBOR_USERNAME
-HARBOR_PASSWORD
-```
-
-Alternatively, set a Docker-compatible `DOCKER_AUTH_CONFIG` variable. The Docker
-build jobs fail fast if neither credential source is available.
-
-The DockerHub base image is pulled through the company Harbor proxy:
-
-```text
-harbor.huanshizhineng.com:18803/dockerhub/ubuntu:20.04
-```
-
-GitLab CI also pulls Docker CLI and BuildKit through the same proxy:
-
-```text
-harbor.huanshizhineng.com:18803/dockerhub/docker:27-cli
-harbor.huanshizhineng.com:18803/dockerhub/moby/buildkit:buildx-stable-1
-```
+Push jobs require registry credentials in CI. Branch check jobs continue
+without Docker login because they run with `PUSH=0`.

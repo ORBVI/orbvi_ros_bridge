@@ -1,0 +1,13 @@
+build/
+devel/
+install/
+logs/
+*.bag
+*.pyc
+__pycache__/
+.catkin_tools/
+.vscode/
+.idea/
+Testing/
+*.log
+*.csv

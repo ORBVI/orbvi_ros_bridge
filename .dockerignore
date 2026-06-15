@@ -1,0 +1,12 @@
+.git
+ci_ws
+build
+devel
+install
+logs
+Testing
+*.bag
+*.log
+*.csv
+__pycache__
+*.pyc

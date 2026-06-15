@@ -11,3 +11,6 @@ __pycache__/
 Testing/
 *.log
 *.csv
+ci_ws/
+docker/ci/manifests/
+docker/ci/logs/

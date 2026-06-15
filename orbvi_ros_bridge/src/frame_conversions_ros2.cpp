@@ -1,20 +1,20 @@
-#include "frame_conversions.hpp"
+#include "frame_conversions_ros2.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <sstream>
 #include <type_traits>
 
+#include <builtin_interfaces/msg/time.hpp>
 #include <boost/array.hpp>
-#include <livox_ros_driver2/CustomPoint.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
-#include <std_msgs/Header.h>
-#include <sensor_msgs/point_cloud2_iterator.h>
+#include <std_msgs/msg/header.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 namespace orbvi_ros_bridge {
 namespace {
@@ -106,12 +106,6 @@ bool ParseSize(const std::string& value, std::size_t* out) {
   return true;
 }
 
-std::uint64_t SystemNowNs() {
-  const auto now = std::chrono::system_clock::now().time_since_epoch();
-  return static_cast<std::uint64_t>(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-}
-
 std::string SanitizeTopicToken(std::string value, const std::string& fallback) {
   value = Trim(value);
   if (value.empty()) {
@@ -135,29 +129,37 @@ std::string RectifiedMetadataKey(std::size_t index, const std::string& field) {
   return "rectified." + std::to_string(index) + "." + field;
 }
 
-ros::Time StampFromNs(std::uint64_t timestamp_ns) {
+std::uint64_t SystemNowNs() {
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+}
+
+builtin_interfaces::msg::Time StampFromNs(std::uint64_t timestamp_ns) {
   if (timestamp_ns == 0) {
     timestamp_ns = SystemNowNs();
   }
   const std::uint64_t sec64 = timestamp_ns / 1000000000ULL;
   const std::uint64_t nsec64 = timestamp_ns % 1000000000ULL;
-  const std::uint32_t sec =
-      sec64 > std::numeric_limits<std::uint32_t>::max()
-          ? std::numeric_limits<std::uint32_t>::max()
-          : static_cast<std::uint32_t>(sec64);
-  return ros::Time(sec, static_cast<std::uint32_t>(nsec64));
+  builtin_interfaces::msg::Time stamp;
+  stamp.sec =
+      sec64 > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())
+          ? std::numeric_limits<std::int32_t>::max()
+          : static_cast<std::int32_t>(sec64);
+  stamp.nanosec = static_cast<std::uint32_t>(nsec64);
+  return stamp;
 }
 
-std_msgs::Header MakeHeader(
+std_msgs::msg::Header MakeHeader(
     std::uint64_t timestamp_ns,
     const std::string& frame_id) {
-  std_msgs::Header header;
+  std_msgs::msg::Header header;
   header.stamp = StampFromNs(timestamp_ns);
   header.frame_id = frame_id.empty() ? "orbvi" : frame_id;
   return header;
 }
 
-std_msgs::Header MakeHeader(
+std_msgs::msg::Header MakeHeader(
     const orbvi_sdk::FrameView& frame,
     const std::string& frame_id_override = "",
     std::uint64_t timestamp_override_ns = 0) {
@@ -602,8 +604,8 @@ bool MakeDisparityJetMat(const orbvi_sdk::FrameView& frame, cv::Mat* bgr) {
 
 void CopyBgrMatToImage(
     const cv::Mat& bgr,
-    const std_msgs::Header& header,
-    sensor_msgs::Image* out) {
+    const std_msgs::msg::Header& header,
+    sensor_msgs::msg::Image* out) {
   out->header = header;
   out->height = static_cast<std::uint32_t>(bgr.rows);
   out->width = static_cast<std::uint32_t>(bgr.cols);
@@ -827,7 +829,7 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
   return outputs;
 }
 
-bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::Image* out) {
+bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Image* out) {
   if (out == nullptr || frame.payload_data == nullptr) {
     return false;
   }
@@ -851,7 +853,7 @@ bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::Image* o
   return SlicePayload(frame, 0, frame.payload_size, &out->data);
 }
 
-bool MakeDepthImage(const orbvi_sdk::DepthMapView& depth, sensor_msgs::Image* out) {
+bool MakeDepthImage(const orbvi_sdk::DepthMapView& depth, sensor_msgs::msg::Image* out) {
   if (out == nullptr || depth.data == nullptr ||
       depth.width == 0 || depth.height == 0 || depth.stride == 0) {
     return false;
@@ -875,7 +877,7 @@ bool MakeDepthImage(const orbvi_sdk::DepthMapView& depth, sensor_msgs::Image* ou
 bool MakeDepthVisualizationImage(
     const orbvi_sdk::DepthMapView& depth,
     const DepthVisualizationOptions& options,
-    sensor_msgs::Image* out) {
+    sensor_msgs::msg::Image* out) {
   if (out == nullptr || depth.data == nullptr ||
       depth.width == 0 || depth.height == 0 || depth.stride == 0 ||
       options.max_depth_m <= options.min_depth_m) {
@@ -915,7 +917,7 @@ bool MakeDepthVisualizationImage(
     const orbvi_sdk::DepthMapView& depth,
     const orbvi_sdk::FrameView& source_disparity,
     const DepthVisualizationOptions& /*options*/,
-    sensor_msgs::Image* out) {
+    sensor_msgs::msg::Image* out) {
   if (out == nullptr || depth.width == 0 || depth.height == 0) {
     return false;
   }
@@ -934,7 +936,7 @@ bool MakeDepthPointCloud(
     const orbvi_sdk::DepthMapView& depth,
     const orbvi_sdk::DepthCalibration& calibration,
     const DepthVisualizationOptions& options,
-    sensor_msgs::PointCloud2* out) {
+    sensor_msgs::msg::PointCloud2* out) {
   if (out == nullptr || depth.data == nullptr ||
       depth.width == 0 || depth.height == 0 || depth.stride == 0 ||
       options.max_depth_m <= options.min_depth_m) {
@@ -970,16 +972,16 @@ bool MakeDepthPointCloud(
       std::min<std::size_t>(point_count, std::numeric_limits<std::uint32_t>::max()));
   out->is_bigendian = false;
   out->is_dense = false;
-  sensor_msgs::PointCloud2Modifier modifier(*out);
+  sensor_msgs::msg::PointCloud2Modifier modifier(*out);
   modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
   modifier.resize(point_count);
 
-  sensor_msgs::PointCloud2Iterator<float> iter_x(*out, "x");
-  sensor_msgs::PointCloud2Iterator<float> iter_y(*out, "y");
-  sensor_msgs::PointCloud2Iterator<float> iter_z(*out, "z");
-  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
-  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
-  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
+  sensor_msgs::msg::PointCloud2Iterator<float> iter_x(*out, "x");
+  sensor_msgs::msg::PointCloud2Iterator<float> iter_y(*out, "y");
+  sensor_msgs::msg::PointCloud2Iterator<float> iter_z(*out, "z");
+  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
+  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
+  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
 
   for (std::uint32_t y = 0; y < depth.height; y += stride) {
     const orbvi_sdk::DepthTileCalibration* tile = nullptr;
@@ -1015,7 +1017,7 @@ bool MakeDepthPointCloud(
 
 bool MakePointCloudMessage(
     const orbvi_sdk::PointCloud& cloud,
-    sensor_msgs::PointCloud2* out) {
+    sensor_msgs::msg::PointCloud2* out) {
   if (out == nullptr) {
     return false;
   }
@@ -1026,16 +1028,16 @@ bool MakePointCloudMessage(
       std::min<std::size_t>(cloud.points.size(), std::numeric_limits<std::uint32_t>::max()));
   out->is_bigendian = false;
   out->is_dense = false;
-  sensor_msgs::PointCloud2Modifier modifier(*out);
+  sensor_msgs::msg::PointCloud2Modifier modifier(*out);
   modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
   modifier.resize(out->width);
 
-  sensor_msgs::PointCloud2Iterator<float> iter_x(*out, "x");
-  sensor_msgs::PointCloud2Iterator<float> iter_y(*out, "y");
-  sensor_msgs::PointCloud2Iterator<float> iter_z(*out, "z");
-  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
-  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
-  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
+  sensor_msgs::msg::PointCloud2Iterator<float> iter_x(*out, "x");
+  sensor_msgs::msg::PointCloud2Iterator<float> iter_y(*out, "y");
+  sensor_msgs::msg::PointCloud2Iterator<float> iter_z(*out, "z");
+  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
+  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
+  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
 
   for (std::uint32_t i = 0; i < out->width; ++i) {
     const auto& point = cloud.points[i];
@@ -1055,7 +1057,7 @@ bool MakePointCloudMessage(
   return true;
 }
 
-bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::Imu* out) {
+bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Imu* out) {
   if (out == nullptr || frame.payload_data == nullptr ||
       frame.payload_size < kImuPayloadDoubleCount * sizeof(double)) {
     return false;
@@ -1092,7 +1094,7 @@ std::string VioTopicSuffix(const orbvi_sdk::FrameView& frame) {
 
 bool MakeLivoxCustomMessage(
     const orbvi_sdk::FrameView& frame,
-    livox_ros_driver2::CustomMsg* out) {
+    livox_ros_driver2::msg::CustomMsg* out) {
   if (out == nullptr || frame.payload_data == nullptr ||
       frame.payload_size < kLivoxCustomHeaderBytes) {
     return false;
@@ -1128,7 +1130,7 @@ bool MakeLivoxCustomMessage(
   return true;
 }
 
-bool MakeVioOdometry(const orbvi_sdk::FrameView& frame, nav_msgs::Odometry* out) {
+bool MakeVioOdometry(const orbvi_sdk::FrameView& frame, nav_msgs::msg::Odometry* out) {
   if (out == nullptr || frame.payload_data == nullptr ||
       frame.payload_size < kVioPayloadDoubleCount * sizeof(double)) {
     return false;

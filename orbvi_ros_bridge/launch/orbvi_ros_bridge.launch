@@ -1,27 +1,12 @@
 <launch>
-  <arg name="host" default="127.0.0.1"/>
-  <arg name="control_port" default="18088"/>
-  <arg name="streams" default="all"/>
-  <arg name="topic_prefix" default="/orbvi"/>
-  <arg name="image_mode" default="raw-and-decoded"/>
-  <arg name="queue_size" default="4"/>
-  <arg name="max_receive_queue_depth" default="8"/>
-  <arg name="max_decode_queue_depth" default="8"/>
-  <arg name="publish_depth" default="auto"/>
-  <arg name="publish_depth_viz" default="true"/>
-  <arg name="publish_depth_pointcloud" default="true"/>
+  <!-- Full raw-data entry: cameras, decoded images, IMUs, MID360, depth and VIO. -->
+  <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
+  <arg name="control_port" default="18088" doc="ORBVI Host SDK control port"/>
 
   <node pkg="orbvi_ros_bridge" type="orbvi_ros_bridge_node" name="orbvi_ros_bridge" output="screen">
     <param name="host" value="$(arg host)"/>
     <param name="control_port" value="$(arg control_port)"/>
-    <param name="streams" value="$(arg streams)"/>
-    <param name="topic_prefix" value="$(arg topic_prefix)"/>
-    <param name="image_mode" value="$(arg image_mode)"/>
-    <param name="queue_size" value="$(arg queue_size)"/>
-    <param name="max_receive_queue_depth" value="$(arg max_receive_queue_depth)"/>
-    <param name="max_decode_queue_depth" value="$(arg max_decode_queue_depth)"/>
-    <param name="publish_depth" value="$(arg publish_depth)"/>
-    <param name="publish_depth_viz" value="$(arg publish_depth_viz)"/>
-    <param name="publish_depth_pointcloud" value="$(arg publish_depth_pointcloud)"/>
+    <param name="streams" value="raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio"/>
+    <param name="topic_prefix" value="/orbvi"/>
   </node>
 </launch>

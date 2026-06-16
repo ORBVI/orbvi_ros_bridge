@@ -7,7 +7,7 @@ need camera, IMU, MID360 LiDAR, disparity, depth and VIO topics on Linux hosts.
 The repository includes:
 
 - ROS1 Noetic and ROS2 Foxy bridge nodes
-- Launch files for all streams, MID360-only and visual/VIO-only workflows
+- Launch files for full-data, visual, and visual + MID360 workflows
 - Minimal `livox_ros_driver2` CustomMsg definitions required by the bridge
 - Public ORBVI Host SDK headers and Linux x86_64/aarch64 libraries
 - MID360 and full-topic rate check tooling
@@ -174,44 +174,24 @@ ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge.launch.py \
   host:=<device-ip>
 ```
 
-For lower CPU load, publish compressed images only:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> \
-  image_mode:=raw-only \
-  queue_size:=2 \
-  max_receive_queue_depth:=4 \
-  max_decode_queue_depth:=4
-```
-
-ROS2 uses the same parameter names:
-
-```bash
-ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge.launch.py \
-  host:=<device-ip> \
-  image_mode:=raw-only \
-  queue_size:=2
-```
-
 ## Scenario Quickstart
 
-Use these entry points first, then tune parameters only after the expected
-topics appear.
+Use the launch file that matches the required runtime capability. Public topics
+are fixed under `/orbvi`.
 
 | Scenario | ROS1 command | ROS2 command | Expected first check |
 | --- | --- | --- | --- |
-| Basic all-data bridge | `roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge.launch.py host:=<device-ip>` | `/orbvi/imu`, `/orbvi/raw/*`, `/orbvi/lidar/*` |
-| MID360 only | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge_mid360.launch.py host:=<device-ip>` | `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
-| Camera, depth and VIO | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge_visual.launch.py host:=<device-ip>` | `/orbvi/depth`, `/orbvi/depth/points`, `/orbvi/vio/odometry` |
+| Basic all-data bridge | `roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom` |
+| Camera, depth and VIO | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge_visual.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
+| Camera, depth, VIO and MID360 | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge_mid360.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
 
-This mirrors the common SDK workflow: start the smallest useful launch file,
-inspect the expected topics, then enable heavier decoded image/depth outputs
-only when the host has enough CPU headroom.
+Use `orbvi_ros_bridge_visual.launch` when the host only needs visual raw data,
+depth and VIO. Use `orbvi_ros_bridge_mid360.launch` when the same visual
+capability should run together with MID360 point cloud and MID360 IMU.
 
-## MID360 Data Check
+## Visual And MID360 Data Check
 
-Start only MID360 streams.
+Start the visual + MID360 entry.
 
 ROS1:
 
@@ -249,7 +229,7 @@ network quality and host load.
 The script checks topics from the ROS bridge host's local ROS master. It should
 run on the same machine that sources the ROS bridge workspace.
 
-MID360-only:
+MID360 topic subset:
 
 ```bash
 scripts/orbvi_ros_bridge_rate_check.sh \
@@ -274,7 +254,6 @@ SSH_PASSWORD=<password> scripts/orbvi_ros_bridge_rate_check.sh \
   --bridge-setup ~/orbvi_ros1_ws/devel/setup.bash \
   --device-host <device-ip> \
   --start-bridge \
-  --streams lidar,lidar_imu \
   --topics /orbvi/lidar/custom,/orbvi/lidar/imu \
   --sample-sec 20
 ```
@@ -291,12 +270,12 @@ Launch files are grouped by ROS version and runtime scenario.
 
 | Launch file | ROS | Purpose |
 | --- | --- | --- |
-| `orbvi_ros_bridge.launch` | ROS1 | All stream entry |
-| `orbvi_ros_bridge_mid360.launch` | ROS1 | MID360 LiDAR + MID360 IMU |
-| `orbvi_ros_bridge_visual.launch` | ROS1 | Camera + device IMU + depth + VIO |
-| `ros2/orbvi_ros_bridge.launch.py` | ROS2 | All stream entry |
-| `ros2/orbvi_ros_bridge_mid360.launch.py` | ROS2 | MID360 LiDAR + MID360 IMU |
-| `ros2/orbvi_ros_bridge_visual.launch.py` | ROS2 | Camera + device IMU + depth + VIO |
+| `orbvi_ros_bridge.launch` | ROS1 | Default full raw-data entry: visual data, depth, VIO and MID360 |
+| `orbvi_ros_bridge_visual.launch` | ROS1 | Visual entry: four raw decoded images, rectified images, device IMU, disparity, depth and VIO |
+| `orbvi_ros_bridge_mid360.launch` | ROS1 | Visual entry plus MID360 point cloud and MID360 IMU |
+| `ros2/orbvi_ros_bridge.launch.py` | ROS2 | Default full raw-data entry: visual data, depth, VIO and MID360 |
+| `ros2/orbvi_ros_bridge_visual.launch.py` | ROS2 | Visual entry: four raw decoded images, rectified images, device IMU, disparity, depth and VIO |
+| `ros2/orbvi_ros_bridge_mid360.launch.py` | ROS2 | Visual entry plus MID360 point cloud and MID360 IMU |
 
 Common parameters:
 
@@ -304,32 +283,8 @@ Common parameters:
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
 | `control_port` | `18088` | ORBVI SDK control port |
-| `streams` | `all` | Comma-separated stream list, or `all` |
-| `topic_prefix` | `/orbvi` | ROS topic prefix |
-| `image_mode` | `raw-and-decoded` | `raw-only`, `decoded` or `raw-and-decoded` |
-| `queue_size` | `4` | ROS publisher queue size |
-| `max_receive_queue_depth` | `8` | Host SDK receive queue depth |
-| `max_decode_queue_depth` | `8` | Host SDK decode queue depth |
-| `publish_depth` | `auto` | `auto`, `true` or `false` |
-| `publish_depth_viz` | `true` | Publish `/orbvi/depth/viz` |
-| `publish_depth_pointcloud` | `true` | Publish `/orbvi/depth/points` |
 
-Less common tuning remains available as private node parameters. For example,
-set `depth_format`, `depth_pointcloud_stride`, `max_decode_latency_ms` or
-`allow_sample_endpoint_fallback` from your own launch wrapper when needed.
-
-Stream aliases:
-
-| Alias | Host SDK stream |
-| --- | --- |
-| `raw` | Raw fisheye |
-| `rectified` | Rectified fisheye |
-| `imu` | Device IMU |
-| `lidar` | MID360 point cloud |
-| `lidar_imu` | MID360 IMU |
-| `disparity` | Disparity image |
-| `depth` | Generated depth output, requires disparity |
-| `vio` | VIO pose |
+Topic names are fixed under `/orbvi`.
 
 ## View Data
 
@@ -428,16 +383,6 @@ rostopic hz /orbvi/lidar/custom --window 30
 If the type exists but no samples arrive, keep the bridge running and inspect
 device-side MID360 state with device management tooling.
 
-### Image decoding uses too much CPU
-
-Use compressed-only output:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> \
-  image_mode:=raw-only
-```
-
 ### Depth topics are missing
 
 Depth output depends on disparity frames and valid calibration from the Host
@@ -445,8 +390,7 @@ SDK:
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch \
-  host:=<device-ip> \
-  publish_depth:=true
+  host:=<device-ip>
 ```
 
 Then check `/orbvi/disparity`, `/orbvi/depth` and the bridge log.

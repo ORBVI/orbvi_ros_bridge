@@ -7,9 +7,6 @@ from launch_ros.actions import Node
 ARGUMENT_DEFAULTS = {
     "host": "127.0.0.1",
     "control_port": "18088",
-    "topic_prefix": "/orbvi",
-    "image_mode": "raw-and-decoded",
-    "publish_depth": "auto",
 }
 
 
@@ -23,6 +20,7 @@ def generate_launch_description():
         for name in ARGUMENT_DEFAULTS
     }
     parameters["streams"] = "raw,rectified,imu,disparity,depth,vio"
+    parameters["topic_prefix"] = "/orbvi"
     return LaunchDescription(arguments + [
         Node(
             package="orbvi_ros_bridge",

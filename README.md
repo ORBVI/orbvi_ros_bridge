@@ -8,6 +8,7 @@ The repository includes:
 
 - ROS1 Noetic and ROS2 Foxy bridge nodes
 - Launch files for all streams, MID360-only and visual/VIO-only workflows
+- Minimal `livox_ros_driver2` CustomMsg definitions required by the bridge
 - Public ORBVI Host SDK headers and Linux x86_64/aarch64 libraries
 - MID360 and full-topic rate check tooling
 - Multi-architecture CI coverage for x86_64 and arm64 Linux hosts
@@ -34,8 +35,8 @@ target ROS build environment.
 
 ## SDK Bundle Model
 
-The bridge follows a product SDK layout: users clone one repository, build one
-ROS package and get a working bridge without rebuilding the Host SDK.
+The bridge follows a product SDK layout: users clone one repository, build the
+included ROS packages and get a working bridge without rebuilding the Host SDK.
 
 - `third_party/orbvi_sdk/include/orbvi_sdk` contains the public Host SDK C++
   headers used by both ROS1 and ROS2.
@@ -43,6 +44,8 @@ ROS package and get a working bridge without rebuilding the Host SDK.
   libraries.
 - `third_party/orbvi_sdk/libs/linux-aarch64` contains the Ubuntu arm64 SDK
   libraries for ORBVI hosts.
+- `livox_ros_driver2` contains the minimal MID360 `CustomMsg` message
+  definitions used by the bridge. It is intentionally a message-only package.
 - CMake selects the matching library directory from `CMAKE_SYSTEM_PROCESSOR`.
 - `libturbojpeg` is linked into `liborbvi_sdk.so`, so bridge users do not need
   to install TurboJPEG just to run the ROS bridge.
@@ -83,8 +86,10 @@ sudo apt update
 sudo apt install -y \
   cmake libboost-dev libopencv-dev \
   ros-noetic-roscpp \
+  ros-noetic-std-msgs \
   ros-noetic-sensor-msgs \
-  ros-noetic-nav-msgs
+  ros-noetic-nav-msgs \
+  ros-noetic-message-generation
 ```
 
 ROS2 Foxy:
@@ -95,13 +100,15 @@ sudo apt install -y \
   cmake libboost-dev libopencv-dev \
   python3-colcon-common-extensions \
   ros-foxy-rclcpp \
+  ros-foxy-std-msgs \
   ros-foxy-sensor-msgs \
-  ros-foxy-nav-msgs
+  ros-foxy-nav-msgs \
+  ros-foxy-rosidl-default-generators
 ```
 
-`livox_ros_driver2` message definitions must be available in the same workspace.
-The CI fixture under `ci/livox_ros_driver2_msgs` is only for automated build
-validation; production workspaces should use the real Livox package.
+The repository already includes the `livox_ros_driver2` message definitions
+needed by `orbvi_ros_bridge`, so a fresh clone in a ROS workspace can compile
+directly.
 
 ## Build ROS1
 
@@ -346,11 +353,12 @@ Point clouds and odometry can be viewed in RViz:
 
 ## Continuous Integration
 
-Maintainer CI validates ROS1 Noetic and ROS2 Foxy builds on both x86_64 and
-arm64 Linux hosts. Normal pipelines only compile and test the current ROS
-packages with the prebuilt CI images selected by `CI_IMAGE_TAG_SUFFIX`. Docker
-image refresh jobs are manual maintenance jobs and should only be run when the
-CI Dockerfile or base dependency set changes.
+Maintainer CI validates the same clone-and-build layout documented above for
+ROS1 Noetic and ROS2 Foxy on both x86_64 and arm64 Linux hosts. Normal
+pipelines only compile and test the current ROS packages with the prebuilt CI
+images selected by `CI_IMAGE_TAG_SUFFIX`. Docker image refresh jobs are manual
+maintenance jobs and should only be run when the CI Dockerfile or base
+dependency set changes.
 
 ROS bridge jobs use the default compiler from each ROS build environment; Host
 SDK binaries should continue to be rebuilt with GCC 9 before being refreshed in
@@ -403,9 +411,10 @@ nc -vz <device-ip> 18088
 
 ### `livox_ros_driver2/CustomMsg` cannot be loaded
 
-Build the real `livox_ros_driver2` message package in the same workspace, then
-source the workspace again. The CI fixture is intentionally minimal and should
-not replace the production Livox package.
+Make sure the whole repository was cloned into the workspace `src` directory
+and rebuild the workspace. This repository includes a message-only
+`livox_ros_driver2` package for `CustomMsg`; it does not include Livox driver
+nodes or device configuration tools.
 
 ### MID360 topic exists but rate is empty
 

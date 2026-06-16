@@ -3,7 +3,7 @@
 <package format="3">
   <name>livox_ros_driver2</name>
   <version>0.0.0</version>
-  <description>CI-only Livox custom message fixture for ORBVI bridge builds.</description>
+  <description>Minimal Livox CustomMsg definitions required to build ORBVI ROS Bridge.</description>
   <maintainer email="dev@huanshizhineng.com">ORBVI Developers</maintainer>
   <license>MIT</license>
 

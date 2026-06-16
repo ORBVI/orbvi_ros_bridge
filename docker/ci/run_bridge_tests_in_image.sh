@@ -18,8 +18,8 @@ case "${ROS_TARGET}" in
 set -exo pipefail
 cd /workspace/project
 mkdir -p ci_ws/src ci_ws/build ci_ws/devel ci_ws/install ci_ws/log
-ln -s /workspace/project/orbvi_ros_bridge /workspace/project/ci_ws/src/orbvi_ros_bridge
-ln -s /workspace/project/ci/livox_ros_driver2_msgs /workspace/project/ci_ws/src/livox_ros_driver2
+touch ci_ws/CATKIN_IGNORE ci_ws/COLCON_IGNORE
+ln -s /workspace/project /workspace/project/ci_ws/src/orbvi_ros_bridge
 source /opt/ros/noetic/setup.bash
 cd /workspace/project/ci_ws
 catkin_make -DCMAKE_BUILD_TYPE=Release -DCATKIN_ENABLE_TESTING=ON
@@ -32,8 +32,8 @@ catkin_test_results
 set -exo pipefail
 cd /workspace/project
 mkdir -p ci_ws/src ci_ws/build ci_ws/install ci_ws/log
-ln -s /workspace/project/orbvi_ros_bridge /workspace/project/ci_ws/src/orbvi_ros_bridge
-ln -s /workspace/project/ci/livox_ros_driver2_msgs /workspace/project/ci_ws/src/livox_ros_driver2
+touch ci_ws/CATKIN_IGNORE ci_ws/COLCON_IGNORE
+ln -s /workspace/project /workspace/project/ci_ws/src/orbvi_ros_bridge
 source /opt/ros/foxy/setup.bash
 cd /workspace/project/ci_ws
 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release

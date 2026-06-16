@@ -118,7 +118,7 @@ docker:ros2:orbvi:arm64:
     - if: '$CI_COMMIT_BRANCH || $CI_COMMIT_TAG'
       changes:
         - .gitlab-ci.yml
-        - ci/livox_ros_driver2_msgs/**/*
+        - livox_ros_driver2/**/*
         - orbvi_ros_bridge/**/*
         - third_party/orbvi_sdk/**/*
     - when: never
@@ -129,13 +129,13 @@ docker:ros2:orbvi:arm64:
     - mkdir -p "${CI_PROJECT_DIR}/ci_ws/src"
     - mkdir -p "${CI_PROJECT_DIR}/ci_ws/build" "${CI_PROJECT_DIR}/ci_ws/devel" "${CI_PROJECT_DIR}/ci_ws/install" "${CI_PROJECT_DIR}/ci_ws/log"
     - touch "${CI_PROJECT_DIR}/ci_ws/build/.ci-keep" "${CI_PROJECT_DIR}/ci_ws/devel/.ci-keep" "${CI_PROJECT_DIR}/ci_ws/install/.ci-keep" "${CI_PROJECT_DIR}/ci_ws/log/.ci-keep"
+    - touch "${CI_PROJECT_DIR}/ci_ws/CATKIN_IGNORE" "${CI_PROJECT_DIR}/ci_ws/COLCON_IGNORE"
     - c++ --version
 
 .ros1_test:
   extends: .ros_common
   script:
-    - ln -s "${CI_PROJECT_DIR}/orbvi_ros_bridge" "${CI_PROJECT_DIR}/ci_ws/src/orbvi_ros_bridge"
-    - ln -s "${CI_PROJECT_DIR}/ci/livox_ros_driver2_msgs" "${CI_PROJECT_DIR}/ci_ws/src/livox_ros_driver2"
+    - ln -s "${CI_PROJECT_DIR}" "${CI_PROJECT_DIR}/ci_ws/src/orbvi_ros_bridge"
     - source /opt/ros/noetic/setup.bash
     - cd "${CI_PROJECT_DIR}/ci_ws"
     - catkin_make -DCMAKE_BUILD_TYPE=Release -DCATKIN_ENABLE_TESTING=ON
@@ -145,8 +145,7 @@ docker:ros2:orbvi:arm64:
 .ros2_test:
   extends: .ros_common
   script:
-    - ln -s "${CI_PROJECT_DIR}/orbvi_ros_bridge" "${CI_PROJECT_DIR}/ci_ws/src/orbvi_ros_bridge"
-    - ln -s "${CI_PROJECT_DIR}/ci/livox_ros_driver2_msgs" "${CI_PROJECT_DIR}/ci_ws/src/livox_ros_driver2"
+    - ln -s "${CI_PROJECT_DIR}" "${CI_PROJECT_DIR}/ci_ws/src/orbvi_ros_bridge"
     - source /opt/ros/foxy/setup.bash
     - cd "${CI_PROJECT_DIR}/ci_ws"
     - colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release

@@ -8,6 +8,7 @@ __pycache__/
 .catkin_tools/
 .vscode/
 .idea/
+.codegraph/
 Testing/
 *.log
 *.csv

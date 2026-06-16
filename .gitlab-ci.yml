@@ -9,6 +9,7 @@ variables:
   DOCKER_CLI_IMAGE: harbor.huanshizhineng.com:18803/dockerhub/docker:27-cli
   DOCKER_BUILDKIT_IMAGE: harbor.huanshizhineng.com:18803/dockerhub/moby/buildkit:buildx-stable-1
   CI_IMAGE_REPOSITORY: harbor.huanshizhineng.com:18803/omnisense/orbvi_ros_bridge_ci
+  CI_IMAGE_TAG_SUFFIX: "785329f9"
   BASE_IMAGE: harbor.huanshizhineng.com:18803/dockerhub/ubuntu:20.04
   APT_MIRROR: aliyun
   ROS_APT_MIRROR: aliyun
@@ -51,35 +52,21 @@ variables:
   after_script:
     - docker buildx rm "orbvi-ros-bridge-${CI_JOB_ID}" || true
 
-.docker_check_base:
-  variables:
-    PUSH: "0"
-  script:
-    - docker/ci/build.sh
-    - |
-      image_env="docker/ci/manifests/ci-images-${CI_COMMIT_SHORT_SHA}.env"
-      . "${image_env}"
-      image_var="$(printf '%s_IMAGE' "${ROS_TARGETS}" | tr '[:lower:]' '[:upper:]')"
-      eval "test_image=\${${image_var}}"
-      docker/ci/run_bridge_tests_in_image.sh "${ROS_TARGETS}" "${test_image}"
-  rules:
-    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-      changes: &ci_image_inputs
-        - .dockerignore
-        - .gitlab-ci.yml
-        - docker/ci/**/*
-        - ci/livox_ros_driver2_msgs/**/*
-        - orbvi_ros_bridge/**/*
-        - third_party/orbvi_sdk/**/*
-    - when: never
-
 .docker_push_base:
   variables:
     PUSH: "1"
-  rules: &default_or_tag_rules
-    - if: '$CI_COMMIT_TAG'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      changes: *ci_image_inputs
+    IMAGE_TAG_SUFFIX: ci
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - .dockerignore
+        - .gitlab-ci.yml
+        - docker/ci/**/*
+      when: manual
+      allow_failure: true
     - when: never
 
 .docker_ubuntu_x86_64:
@@ -97,34 +84,6 @@ variables:
   variables:
     PLATFORMS: linux/arm64
     IMAGE_ARCH: arm64
-
-docker:ros1:ubuntu:x86_64:check:
-  extends:
-    - .docker_ubuntu_x86_64
-    - .docker_check_base
-  variables:
-    ROS_TARGETS: ros1
-
-docker:ros1:orbvi:arm64:check:
-  extends:
-    - .docker_orbvi_arm64
-    - .docker_check_base
-  variables:
-    ROS_TARGETS: ros1
-
-docker:ros2:ubuntu:x86_64:check:
-  extends:
-    - .docker_ubuntu_x86_64
-    - .docker_check_base
-  variables:
-    ROS_TARGETS: ros2
-
-docker:ros2:orbvi:arm64:check:
-  extends:
-    - .docker_orbvi_arm64
-    - .docker_check_base
-  variables:
-    ROS_TARGETS: ros2
 
 docker:ros1:ubuntu:x86_64:
   extends:
@@ -153,6 +112,16 @@ docker:ros2:orbvi:arm64:
     - .docker_push_base
   variables:
     ROS_TARGETS: ros2
+
+.ros_build_rules:
+  rules: &ros_build_rules
+    - if: '$CI_COMMIT_BRANCH || $CI_COMMIT_TAG'
+      changes:
+        - .gitlab-ci.yml
+        - ci/livox_ros_driver2_msgs/**/*
+        - orbvi_ros_bridge/**/*
+        - third_party/orbvi_sdk/**/*
+    - when: never
 
 .ros_common:
   stage: test
@@ -186,36 +155,28 @@ docker:ros2:orbvi:arm64:
 
 ros1:ubuntu:x86_64:
   extends: .ros1_test
-  image: ${CI_IMAGE_REPOSITORY}:ros1-focal-${CI_COMMIT_SHORT_SHA}-amd64
-  needs:
-    - docker:ros1:ubuntu:x86_64
+  image: ${CI_IMAGE_REPOSITORY}:ros1-focal-${CI_IMAGE_TAG_SUFFIX}-amd64
   tags:
     - ubuntu
-  rules: *default_or_tag_rules
+  rules: *ros_build_rules
 
 ros1:orbvi:arm64:
   extends: .ros1_test
-  image: ${CI_IMAGE_REPOSITORY}:ros1-focal-${CI_COMMIT_SHORT_SHA}-arm64
-  needs:
-    - docker:ros1:orbvi:arm64
+  image: ${CI_IMAGE_REPOSITORY}:ros1-focal-${CI_IMAGE_TAG_SUFFIX}-arm64
   tags:
     - orbvi
-  rules: *default_or_tag_rules
+  rules: *ros_build_rules
 
 ros2:ubuntu:x86_64:
   extends: .ros2_test
-  image: ${CI_IMAGE_REPOSITORY}:ros2-focal-${CI_COMMIT_SHORT_SHA}-amd64
-  needs:
-    - docker:ros2:ubuntu:x86_64
+  image: ${CI_IMAGE_REPOSITORY}:ros2-focal-${CI_IMAGE_TAG_SUFFIX}-amd64
   tags:
     - ubuntu
-  rules: *default_or_tag_rules
+  rules: *ros_build_rules
 
 ros2:orbvi:arm64:
   extends: .ros2_test
-  image: ${CI_IMAGE_REPOSITORY}:ros2-focal-${CI_COMMIT_SHORT_SHA}-arm64
-  needs:
-    - docker:ros2:orbvi:arm64
+  image: ${CI_IMAGE_REPOSITORY}:ros2-focal-${CI_IMAGE_TAG_SUFFIX}-arm64
   tags:
     - orbvi
-  rules: *default_or_tag_rules
+  rules: *ros_build_rules

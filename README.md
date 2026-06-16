@@ -283,6 +283,9 @@ Common parameters:
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
 | `control_port` | `18088` | ORBVI SDK control port |
+| `connect_timeout_ms` | `2000` | Initial Host SDK connect timeout per attempt |
+| `connect_retry_count` | `4` | Initial Host SDK connect retries after the first failed attempt |
+| `connect_retry_delay_ms` | `1000` | Delay between initial Host SDK connect attempts |
 
 Topic names are fixed under `/orbvi`.
 

@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -53,6 +55,9 @@ struct BridgeConfig {
   orbvi_sdk::DepthGenerationOptions depth_options;
   DepthVisualizationOptions depth_visualization_options;
   orbvi_sdk::PointCloudGenerationOptions pointcloud_options;
+  std::uint32_t connect_timeout_ms = 2000;
+  std::uint32_t connect_retry_count = 4;
+  std::uint32_t connect_retry_delay_ms = 1000;
   std::uint32_t first_frame_timeout_ms = 5000;
   std::size_t max_receive_queue_depth = 8;
   std::size_t max_decode_queue_depth = 8;
@@ -239,6 +244,7 @@ class BridgeNode::Impl {
     orbvi_sdk::ClientOptions options;
     options.host = config_.host;
     options.control_port = config_.control_port;
+    options.connect_timeout_ms = config_.connect_timeout_ms;
     options.max_receive_queue_depth = config_.max_receive_queue_depth;
     options.allow_sample_endpoint_fallback = config_.allow_sample_endpoint_fallback;
     options.default_decode_policy.mode = config_.decode_mode;
@@ -246,9 +252,7 @@ class BridgeNode::Impl {
     options.default_decode_policy.max_decode_latency_ms = config_.max_decode_latency_ms;
 
     client_.reset(new orbvi_sdk::Client(options));
-    const auto connected = client_->connect();
-    if (!connected) {
-      ROS_ERROR_STREAM("ORBVI Host SDK connect failed: " << connected.error().message);
+    if (!ConnectWithRetry()) {
       client_.reset();
       return false;
     }
@@ -282,6 +286,34 @@ class BridgeNode::Impl {
   }
 
  private:
+  bool ConnectWithRetry() {
+    const std::uint32_t attempts = config_.connect_retry_count + 1;
+    for (std::uint32_t attempt = 1; attempt <= attempts; ++attempt) {
+      const auto connected = client_->connect();
+      if (connected) {
+        if (attempt > 1) {
+          ROS_INFO_STREAM(
+              "ORBVI Host SDK connect succeeded after " << attempt << " attempts");
+        }
+        return true;
+      }
+
+      if (attempt == attempts) {
+        ROS_ERROR_STREAM(
+            "ORBVI Host SDK connect failed after " << attempts
+            << " attempts: " << connected.error().message);
+        return false;
+      }
+
+      ROS_WARN_STREAM(
+          "ORBVI Host SDK connect attempt " << attempt << "/" << attempts
+          << " failed: " << connected.error().message
+          << "; retrying in " << config_.connect_retry_delay_ms << " ms");
+      std::this_thread::sleep_for(std::chrono::milliseconds(config_.connect_retry_delay_ms));
+    }
+    return false;
+  }
+
   BridgeConfig LoadConfig() {
     BridgeConfig config = DefaultConfig();
     private_node_.param<std::string>("host", config.host, config.host);
@@ -331,6 +363,24 @@ class BridgeNode::Impl {
     private_node_.param<int>("max_decode_latency_ms", decode_latency, decode_latency);
     config.max_decode_latency_ms =
         decode_latency <= 0 ? 100u : static_cast<std::uint32_t>(decode_latency);
+
+    int connect_timeout = static_cast<int>(config.connect_timeout_ms);
+    private_node_.param<int>("connect_timeout_ms", connect_timeout, connect_timeout);
+    config.connect_timeout_ms =
+        connect_timeout <= 0 ? 2000u : static_cast<std::uint32_t>(connect_timeout);
+
+    int connect_retry_count = static_cast<int>(config.connect_retry_count);
+    private_node_.param<int>("connect_retry_count", connect_retry_count, connect_retry_count);
+    config.connect_retry_count =
+        connect_retry_count < 0 ? 0u : static_cast<std::uint32_t>(connect_retry_count);
+
+    int connect_retry_delay = static_cast<int>(config.connect_retry_delay_ms);
+    private_node_.param<int>(
+        "connect_retry_delay_ms",
+        connect_retry_delay,
+        connect_retry_delay);
+    config.connect_retry_delay_ms =
+        connect_retry_delay < 0 ? 0u : static_cast<std::uint32_t>(connect_retry_delay);
 
     int first_frame_timeout = static_cast<int>(config.first_frame_timeout_ms);
     private_node_.param<int>("first_frame_timeout_ms", first_frame_timeout, first_frame_timeout);

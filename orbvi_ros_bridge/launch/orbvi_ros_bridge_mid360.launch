@@ -2,10 +2,16 @@
   <!-- Visual raw-data entry plus MID360 point cloud and MID360 IMU. -->
   <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
   <arg name="control_port" default="18088" doc="ORBVI Host SDK control port"/>
+  <arg name="connect_timeout_ms" default="2000" doc="ORBVI Host SDK initial connect timeout per attempt"/>
+  <arg name="connect_retry_count" default="4" doc="Initial Host SDK connect retries after the first failed attempt"/>
+  <arg name="connect_retry_delay_ms" default="1000" doc="Delay between initial Host SDK connect attempts"/>
 
   <node pkg="orbvi_ros_bridge" type="orbvi_ros_bridge_node" name="orbvi_ros_bridge" output="screen">
     <param name="host" value="$(arg host)"/>
     <param name="control_port" value="$(arg control_port)"/>
+    <param name="connect_timeout_ms" value="$(arg connect_timeout_ms)"/>
+    <param name="connect_retry_count" value="$(arg connect_retry_count)"/>
+    <param name="connect_retry_delay_ms" value="$(arg connect_retry_delay_ms)"/>
     <param name="streams" value="raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio"/>
     <param name="topic_prefix" value="/orbvi"/>
   </node>

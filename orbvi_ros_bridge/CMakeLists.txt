@@ -301,8 +301,9 @@ else()
   install(TARGETS orbvi_ros_bridge_node
     RUNTIME DESTINATION lib/${PROJECT_NAME}
   )
-  install(DIRECTORY launch/
+  install(DIRECTORY launch/ros2/
     DESTINATION share/${PROJECT_NAME}/launch
+    FILES_MATCHING PATTERN "*.launch.py"
   )
 
   ament_add_gtest(test_orbvi_ros_bridge_host_sdk_link_ros2 test/test_host_sdk_link_ros2.cpp)

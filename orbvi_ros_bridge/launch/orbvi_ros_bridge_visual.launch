@@ -1,16 +1,12 @@
 <launch>
-  <arg name="host" default="127.0.0.1"/>
-  <arg name="control_port" default="18088"/>
-  <arg name="topic_prefix" default="/orbvi"/>
-  <arg name="image_mode" default="raw-and-decoded"/>
-  <arg name="publish_depth" default="auto"/>
+  <!-- Visual raw-data entry: four raw decoded images, rectified images, depth and VIO. -->
+  <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
+  <arg name="control_port" default="18088" doc="ORBVI Host SDK control port"/>
 
-  <include file="$(find orbvi_ros_bridge)/launch/orbvi_ros_bridge.launch">
-    <arg name="host" value="$(arg host)"/>
-    <arg name="control_port" value="$(arg control_port)"/>
-    <arg name="streams" value="raw,rectified,imu,disparity,depth,vio"/>
-    <arg name="topic_prefix" value="$(arg topic_prefix)"/>
-    <arg name="image_mode" value="$(arg image_mode)"/>
-    <arg name="publish_depth" value="$(arg publish_depth)"/>
-  </include>
+  <node pkg="orbvi_ros_bridge" type="orbvi_ros_bridge_node" name="orbvi_ros_bridge" output="screen">
+    <param name="host" value="$(arg host)"/>
+    <param name="control_port" value="$(arg control_port)"/>
+    <param name="streams" value="raw,rectified,imu,disparity,depth,vio"/>
+    <param name="topic_prefix" value="/orbvi"/>
+  </node>
 </launch>

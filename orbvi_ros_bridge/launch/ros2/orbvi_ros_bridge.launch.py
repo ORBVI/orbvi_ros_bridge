@@ -7,6 +7,9 @@ from launch_ros.actions import Node
 ARGUMENT_DEFAULTS = {
     "host": "127.0.0.1",
     "control_port": "18088",
+    "connect_timeout_ms": "2000",
+    "connect_retry_count": "4",
+    "connect_retry_delay_ms": "1000",
 }
 
 

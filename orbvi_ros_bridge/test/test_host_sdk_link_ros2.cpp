@@ -228,7 +228,7 @@ TEST(OrbviRosBridgeDepthImages, Float32MetersMapsToRosImage) {
   depth.frame_id = "orbvi/disparity_stream/depth";
   depth.data = {0, 0, 128, 63, 0, 0, 0, 64};
 
-  sensor_msgs::Image image;
+  sensor_msgs::msg::Image image;
   ASSERT_TRUE(orbvi_ros_bridge::MakeDepthImage(depth.view(), &image));
   EXPECT_EQ(image.width, 2u);
   EXPECT_EQ(image.height, 1u);
@@ -247,7 +247,7 @@ TEST(OrbviRosBridgeDepthImages, Uint16MillimetersMapsToRosImage) {
   depth.frame_id = "orbvi/depth";
   depth.data = {232, 3, 208, 7};
 
-  sensor_msgs::Image image;
+  sensor_msgs::msg::Image image;
   ASSERT_TRUE(orbvi_ros_bridge::MakeDepthImage(depth.view(), &image));
   EXPECT_EQ(image.encoding, "16UC1");
   EXPECT_EQ(image.step, 4u);
@@ -267,7 +267,7 @@ TEST(OrbviRosBridgeDepthImages, VisualizationImageUsesBgr8) {
   options.min_depth_m = 0.0;
   options.max_depth_m = 10.0;
 
-  sensor_msgs::Image image;
+  sensor_msgs::msg::Image image;
   ASSERT_TRUE(orbvi_ros_bridge::MakeDepthVisualizationImage(depth.view(), options, &image));
   EXPECT_EQ(image.encoding, "bgr8");
   EXPECT_EQ(image.step, 9u);
@@ -306,7 +306,7 @@ TEST(OrbviRosBridgeDepthImages, VisualizationImageMatchesSourceDisparityJet) {
   options.min_depth_m = 0.0;
   options.max_depth_m = 10.0;
 
-  sensor_msgs::Image image;
+  sensor_msgs::msg::Image image;
   ASSERT_TRUE(orbvi_ros_bridge::MakeDepthVisualizationImage(
       depth.view(),
       disparity.view(),
@@ -350,7 +350,7 @@ TEST(OrbviRosBridgeDepthImages, PointCloudUsesDepthCalibration) {
   options.max_depth_m = 10.0;
   options.pointcloud_stride = 1;
 
-  sensor_msgs::PointCloud2 cloud;
+  sensor_msgs::msg::PointCloud2 cloud;
   ASSERT_TRUE(orbvi_ros_bridge::MakeDepthPointCloud(
       depth.view(),
       calibration,
@@ -377,7 +377,7 @@ TEST(OrbviRosBridgeDepthImages, SdkPointCloudMapsToRosPointCloud2) {
   point.b = 64;
   cloud.points.push_back(point);
 
-  sensor_msgs::PointCloud2 message;
+  sensor_msgs::msg::PointCloud2 message;
   ASSERT_TRUE(orbvi_ros_bridge::MakePointCloudMessage(cloud, &message));
   EXPECT_EQ(message.header.frame_id, "base_link");
   EXPECT_EQ(message.height, 1u);

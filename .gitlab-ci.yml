@@ -22,11 +22,12 @@ variables:
     GIT_DEPTH: "1"
     DOCKER_BUILDKIT: "1"
     DOCKER_HOST: unix:///var/run/docker.sock
-    PUSH: "1"
+    PUSH: "0"
     BUILDKIT_PROGRESS: plain
     IMAGE_REPOSITORY: harbor.huanshizhineng.com:18803/omnisense/orbvi_ros_bridge_ci
   before_script:
     - mkdir -p docker/ci/manifests
+    - mkdir -p docker/ci/logs
     - touch docker/ci/manifests/.ci-keep
     - docker info
     - docker buildx version
@@ -37,9 +38,11 @@ variables:
         mkdir -p "${HOME}/.docker"
         printf '%s' "${DOCKER_AUTH_CONFIG}" > "${HOME}/.docker/config.json"
         echo "Using DOCKER_AUTH_CONFIG for Docker registry authentication."
-      else
-        echo "ERROR: Harbor push requires HARBOR_USERNAME/HARBOR_PASSWORD or DOCKER_AUTH_CONFIG in CI variables." >&2
+      elif [ "${PUSH:-0}" = "1" ]; then
+        echo "ERROR: set HARBOR_USERNAME/HARBOR_PASSWORD or DOCKER_AUTH_CONFIG GitLab CI variables for ${HARBOR_REGISTRY}." >&2
         exit 1
+      else
+        echo "WARN: Harbor credentials are not set; continuing without docker login for PUSH=0."
       fi
     - docker buildx create --use --name "orbvi-ros-bridge-${CI_JOB_ID}" --driver docker-container --driver-opt "image=${DOCKER_BUILDKIT_IMAGE}" || docker buildx use "orbvi-ros-bridge-${CI_JOB_ID}"
     - docker buildx inspect --bootstrap
@@ -47,11 +50,37 @@ variables:
     - docker/ci/build.sh
   after_script:
     - docker buildx rm "orbvi-ros-bridge-${CI_JOB_ID}" || true
-  artifacts:
-    when: always
-    expire_in: 30 days
-    paths:
-      - docker/ci/manifests/
+
+.docker_check_base:
+  variables:
+    PUSH: "0"
+  script:
+    - docker/ci/build.sh
+    - |
+      image_env="docker/ci/manifests/ci-images-${CI_COMMIT_SHORT_SHA}.env"
+      . "${image_env}"
+      image_var="$(printf '%s_IMAGE' "${ROS_TARGETS}" | tr '[:lower:]' '[:upper:]')"
+      eval "test_image=\${${image_var}}"
+      docker/ci/run_bridge_tests_in_image.sh "${ROS_TARGETS}" "${test_image}"
+  rules:
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      changes: &ci_image_inputs
+        - .dockerignore
+        - .gitlab-ci.yml
+        - docker/ci/**/*
+        - ci/livox_ros_driver2_msgs/**/*
+        - orbvi_ros_bridge/**/*
+        - third_party/orbvi_sdk/**/*
+    - when: never
+
+.docker_push_base:
+  variables:
+    PUSH: "1"
+  rules: &default_or_tag_rules
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes: *ci_image_inputs
+    - when: never
 
 .docker_ubuntu_x86_64:
   extends: .docker_build_base
@@ -69,23 +98,59 @@ variables:
     PLATFORMS: linux/arm64
     IMAGE_ARCH: arm64
 
+docker:ros1:ubuntu:x86_64:check:
+  extends:
+    - .docker_ubuntu_x86_64
+    - .docker_check_base
+  variables:
+    ROS_TARGETS: ros1
+
+docker:ros1:orbvi:arm64:check:
+  extends:
+    - .docker_orbvi_arm64
+    - .docker_check_base
+  variables:
+    ROS_TARGETS: ros1
+
+docker:ros2:ubuntu:x86_64:check:
+  extends:
+    - .docker_ubuntu_x86_64
+    - .docker_check_base
+  variables:
+    ROS_TARGETS: ros2
+
+docker:ros2:orbvi:arm64:check:
+  extends:
+    - .docker_orbvi_arm64
+    - .docker_check_base
+  variables:
+    ROS_TARGETS: ros2
+
 docker:ros1:ubuntu:x86_64:
-  extends: .docker_ubuntu_x86_64
+  extends:
+    - .docker_ubuntu_x86_64
+    - .docker_push_base
   variables:
     ROS_TARGETS: ros1
 
 docker:ros1:orbvi:arm64:
-  extends: .docker_orbvi_arm64
+  extends:
+    - .docker_orbvi_arm64
+    - .docker_push_base
   variables:
     ROS_TARGETS: ros1
 
 docker:ros2:ubuntu:x86_64:
-  extends: .docker_ubuntu_x86_64
+  extends:
+    - .docker_ubuntu_x86_64
+    - .docker_push_base
   variables:
     ROS_TARGETS: ros2
 
 docker:ros2:orbvi:arm64:
-  extends: .docker_orbvi_arm64
+  extends:
+    - .docker_orbvi_arm64
+    - .docker_push_base
   variables:
     ROS_TARGETS: ros2
 
@@ -107,12 +172,6 @@ docker:ros2:orbvi:arm64:
     - catkin_make -DCMAKE_BUILD_TYPE=Release -DCATKIN_ENABLE_TESTING=ON
     - catkin_make run_tests_orbvi_ros_bridge
     - catkin_test_results
-  artifacts:
-    when: always
-    expire_in: 1 week
-    paths:
-      - ci_ws/build
-      - ci_ws/devel
 
 .ros2_test:
   extends: .ros_common
@@ -124,13 +183,6 @@ docker:ros2:orbvi:arm64:
     - colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
     - colcon test --packages-select orbvi_ros_bridge
     - colcon test-result --verbose
-  artifacts:
-    when: always
-    expire_in: 1 week
-    paths:
-      - ci_ws/build
-      - ci_ws/install
-      - ci_ws/log
 
 ros1:ubuntu:x86_64:
   extends: .ros1_test
@@ -139,6 +191,7 @@ ros1:ubuntu:x86_64:
     - docker:ros1:ubuntu:x86_64
   tags:
     - ubuntu
+  rules: *default_or_tag_rules
 
 ros1:orbvi:arm64:
   extends: .ros1_test
@@ -147,6 +200,7 @@ ros1:orbvi:arm64:
     - docker:ros1:orbvi:arm64
   tags:
     - orbvi
+  rules: *default_or_tag_rules
 
 ros2:ubuntu:x86_64:
   extends: .ros2_test
@@ -155,6 +209,7 @@ ros2:ubuntu:x86_64:
     - docker:ros2:ubuntu:x86_64
   tags:
     - ubuntu
+  rules: *default_or_tag_rules
 
 ros2:orbvi:arm64:
   extends: .ros2_test
@@ -163,3 +218,4 @@ ros2:orbvi:arm64:
     - docker:ros2:orbvi:arm64
   tags:
     - orbvi
+  rules: *default_or_tag_rules

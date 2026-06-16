@@ -10,7 +10,7 @@ The repository includes:
 - Launch files for all streams, MID360-only and visual/VIO-only workflows
 - Public ORBVI Host SDK headers and Linux x86_64/aarch64 libraries
 - MID360 and full-topic rate check tooling
-- GitLab CI for x86_64 Ubuntu runners and arm64 ORBVI runners
+- Multi-architecture CI coverage for x86_64 and arm64 Linux hosts
 
 Board runtime, OTA implementation, factory packages, private deployment scripts,
 credentials and customer data must stay outside this public repository.
@@ -81,7 +81,7 @@ ROS1 Noetic:
 ```bash
 sudo apt update
 sudo apt install -y \
-  cmake libopencv-dev \
+  cmake libboost-dev libopencv-dev \
   ros-noetic-roscpp \
   ros-noetic-sensor-msgs \
   ros-noetic-nav-msgs
@@ -92,7 +92,7 @@ ROS2 Foxy:
 ```bash
 sudo apt update
 sudo apt install -y \
-  cmake libopencv-dev \
+  cmake libboost-dev libopencv-dev \
   python3-colcon-common-extensions \
   ros-foxy-rclcpp \
   ros-foxy-sensor-msgs \
@@ -340,32 +340,13 @@ Point clouds and odometry can be viewed in RViz:
 - `/orbvi/depth/points`
 - `/orbvi/vio/odometry`
 
-## GitLab CI
+## Continuous Integration
 
-The repository tests both ROS versions on both native runner families. The
-`ubuntu` runner is the x86_64 CI lane; the `orbvi` runner is the arm64 CI lane.
+Maintainer CI validates ROS1 Noetic and ROS2 Foxy builds on both x86_64 and
+arm64 Linux hosts. Merge request checks build the matching Docker test image
+locally on each platform and run bridge tests inside it; release-line pipelines
+may also publish reusable CI images for the maintainers.
 
-| Job | Runner tag | Platform | Image |
-| --- | --- | --- | --- |
-| `docker:ros1:ubuntu:x86_64` | `ubuntu` | `linux/amd64` | `ros1-focal-<sha>-amd64` |
-| `docker:ros2:ubuntu:x86_64` | `ubuntu` | `linux/amd64` | `ros2-focal-<sha>-amd64` |
-| `docker:ros1:orbvi:arm64` | `orbvi` | `linux/arm64` | `ros1-focal-<sha>-arm64` |
-| `docker:ros2:orbvi:arm64` | `orbvi` | `linux/arm64` | `ros2-focal-<sha>-arm64` |
-| `ros1:ubuntu:x86_64` | `ubuntu` | `linux/amd64` | consumes `ros1-focal-<sha>-amd64` |
-| `ros2:ubuntu:x86_64` | `ubuntu` | `linux/amd64` | consumes `ros2-focal-<sha>-amd64` |
-| `ros1:orbvi:arm64` | `orbvi` | `linux/arm64` | consumes `ros1-focal-<sha>-arm64` |
-| `ros2:orbvi:arm64` | `orbvi` | `linux/arm64` | consumes `ros2-focal-<sha>-arm64` |
-
-CI build images are pushed to:
-
-```text
-harbor.huanshizhineng.com:18803/omnisense/orbvi_ros_bridge_ci
-```
-
-The Docker base image is pulled through the company Harbor DockerHub proxy.
-Harbor push credentials are read from `HARBOR_USERNAME` and `HARBOR_PASSWORD`,
-or from a Docker-compatible `DOCKER_AUTH_CONFIG` CI variable. Docker image jobs
-fail fast when neither credential source is available.
 ROS bridge jobs use the default compiler from each ROS build environment; Host
 SDK binaries should continue to be rebuilt with GCC 9 before being refreshed in
 `third_party/orbvi_sdk`.

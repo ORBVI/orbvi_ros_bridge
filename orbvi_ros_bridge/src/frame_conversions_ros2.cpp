@@ -1,6 +1,7 @@
 #include "frame_conversions_ros2.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -10,7 +11,6 @@
 #include <type_traits>
 
 #include <builtin_interfaces/msg/time.hpp>
-#include <boost/array.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <std_msgs/msg/header.hpp>
@@ -202,7 +202,7 @@ bool ReadPodArray(
     const std::uint8_t* payload,
     std::size_t payload_size,
     std::size_t* offset,
-    boost::array<T, N>* out) {
+    std::array<T, N>* out) {
   if (out == nullptr) {
     return false;
   }
@@ -972,16 +972,16 @@ bool MakeDepthPointCloud(
       std::min<std::size_t>(point_count, std::numeric_limits<std::uint32_t>::max()));
   out->is_bigendian = false;
   out->is_dense = false;
-  sensor_msgs::msg::PointCloud2Modifier modifier(*out);
+  sensor_msgs::PointCloud2Modifier modifier(*out);
   modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
   modifier.resize(point_count);
 
-  sensor_msgs::msg::PointCloud2Iterator<float> iter_x(*out, "x");
-  sensor_msgs::msg::PointCloud2Iterator<float> iter_y(*out, "y");
-  sensor_msgs::msg::PointCloud2Iterator<float> iter_z(*out, "z");
-  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
-  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
-  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
+  sensor_msgs::PointCloud2Iterator<float> iter_x(*out, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(*out, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(*out, "z");
+  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
+  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
+  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
 
   for (std::uint32_t y = 0; y < depth.height; y += stride) {
     const orbvi_sdk::DepthTileCalibration* tile = nullptr;
@@ -1028,16 +1028,16 @@ bool MakePointCloudMessage(
       std::min<std::size_t>(cloud.points.size(), std::numeric_limits<std::uint32_t>::max()));
   out->is_bigendian = false;
   out->is_dense = false;
-  sensor_msgs::msg::PointCloud2Modifier modifier(*out);
+  sensor_msgs::PointCloud2Modifier modifier(*out);
   modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
   modifier.resize(out->width);
 
-  sensor_msgs::msg::PointCloud2Iterator<float> iter_x(*out, "x");
-  sensor_msgs::msg::PointCloud2Iterator<float> iter_y(*out, "y");
-  sensor_msgs::msg::PointCloud2Iterator<float> iter_z(*out, "z");
-  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
-  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
-  sensor_msgs::msg::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
+  sensor_msgs::PointCloud2Iterator<float> iter_x(*out, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(*out, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(*out, "z");
+  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_r(*out, "r");
+  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_g(*out, "g");
+  sensor_msgs::PointCloud2Iterator<std::uint8_t> iter_b(*out, "b");
 
   for (std::uint32_t i = 0; i < out->width; ++i) {
     const auto& point = cloud.points[i];

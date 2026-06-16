@@ -2,55 +2,15 @@
   <arg name="host" default="127.0.0.1"/>
   <arg name="control_port" default="18088"/>
   <arg name="topic_prefix" default="/orbvi"/>
-  <arg name="require_streaming_transport" default="true"/>
-  <arg name="allow_sample_endpoint_fallback" default="false"/>
   <arg name="image_mode" default="raw-and-decoded"/>
-  <arg name="queue_size" default="4"/>
-  <arg name="max_receive_queue_depth" default="8"/>
-  <arg name="max_decode_queue_depth" default="8"/>
-  <arg name="max_decode_latency_ms" default="100"/>
-  <arg name="decode_threads" default=""/>
-  <arg name="first_frame_timeout_ms" default="5000"/>
   <arg name="publish_depth" default="auto"/>
-  <arg name="depth_format" default="float32"/>
-  <arg name="depth_invalid_policy" default="nan"/>
-  <arg name="depth_min_disparity_px" default="0.01"/>
-  <arg name="depth_max_depth_m" default="50.0"/>
-  <arg name="publish_depth_viz" default="true"/>
-  <arg name="publish_depth_pointcloud" default="true"/>
-  <arg name="depth_viz_min_depth_m" default="0.1"/>
-  <arg name="depth_viz_max_depth_m" default="20.0"/>
-  <arg name="depth_pointcloud_stride" default="4"/>
-  <arg name="depth_pointcloud_max_disp_jump_px" default="2.0"/>
-  <arg name="depth_pointcloud_frame" default="ros"/>
-  <arg name="depth_pointcloud_frame_id" default="base_link"/>
 
   <include file="$(find orbvi_ros_bridge)/launch/orbvi_ros_bridge.launch">
     <arg name="host" value="$(arg host)"/>
     <arg name="control_port" value="$(arg control_port)"/>
     <arg name="streams" value="raw,rectified,imu,disparity,depth,vio"/>
     <arg name="topic_prefix" value="$(arg topic_prefix)"/>
-    <arg name="require_streaming_transport" value="$(arg require_streaming_transport)"/>
-    <arg name="allow_sample_endpoint_fallback" value="$(arg allow_sample_endpoint_fallback)"/>
     <arg name="image_mode" value="$(arg image_mode)"/>
-    <arg name="queue_size" value="$(arg queue_size)"/>
-    <arg name="max_receive_queue_depth" value="$(arg max_receive_queue_depth)"/>
-    <arg name="max_decode_queue_depth" value="$(arg max_decode_queue_depth)"/>
-    <arg name="max_decode_latency_ms" value="$(arg max_decode_latency_ms)"/>
-    <arg name="decode_threads" value="$(arg decode_threads)"/>
-    <arg name="first_frame_timeout_ms" value="$(arg first_frame_timeout_ms)"/>
     <arg name="publish_depth" value="$(arg publish_depth)"/>
-    <arg name="depth_format" value="$(arg depth_format)"/>
-    <arg name="depth_invalid_policy" value="$(arg depth_invalid_policy)"/>
-    <arg name="depth_min_disparity_px" value="$(arg depth_min_disparity_px)"/>
-    <arg name="depth_max_depth_m" value="$(arg depth_max_depth_m)"/>
-    <arg name="publish_depth_viz" value="$(arg publish_depth_viz)"/>
-    <arg name="publish_depth_pointcloud" value="$(arg publish_depth_pointcloud)"/>
-    <arg name="depth_viz_min_depth_m" value="$(arg depth_viz_min_depth_m)"/>
-    <arg name="depth_viz_max_depth_m" value="$(arg depth_viz_max_depth_m)"/>
-    <arg name="depth_pointcloud_stride" value="$(arg depth_pointcloud_stride)"/>
-    <arg name="depth_pointcloud_max_disp_jump_px" value="$(arg depth_pointcloud_max_disp_jump_px)"/>
-    <arg name="depth_pointcloud_frame" value="$(arg depth_pointcloud_frame)"/>
-    <arg name="depth_pointcloud_frame_id" value="$(arg depth_pointcloud_frame_id)"/>
   </include>
 </launch>

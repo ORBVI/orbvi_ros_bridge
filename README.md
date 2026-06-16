@@ -157,16 +157,14 @@ ROS1 all streams:
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> \
-  control_port:=18088
+  host:=<device-ip>
 ```
 
 ROS2 all streams:
 
 ```bash
 ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge.launch.py \
-  host:=<device-ip> \
-  control_port:=18088
+  host:=<device-ip>
 ```
 
 For lower CPU load, publish compressed images only:
@@ -282,6 +280,8 @@ Outputs are written to a timestamped directory:
 
 ## Launch Files
 
+Launch files are grouped by ROS version and runtime scenario.
+
 | Launch file | ROS | Purpose |
 | --- | --- | --- |
 | `orbvi_ros_bridge.launch` | ROS1 | All stream entry |
@@ -297,7 +297,7 @@ Common parameters:
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
 | `control_port` | `18088` | ORBVI SDK control port |
-| `streams` | `raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio` | Comma-separated stream list |
+| `streams` | `all` | Comma-separated stream list, or `all` |
 | `topic_prefix` | `/orbvi` | ROS topic prefix |
 | `image_mode` | `raw-and-decoded` | `raw-only`, `decoded` or `raw-and-decoded` |
 | `queue_size` | `4` | ROS publisher queue size |
@@ -306,6 +306,10 @@ Common parameters:
 | `publish_depth` | `auto` | `auto`, `true` or `false` |
 | `publish_depth_viz` | `true` | Publish `/orbvi/depth/viz` |
 | `publish_depth_pointcloud` | `true` | Publish `/orbvi/depth/points` |
+
+Less common tuning remains available as private node parameters. For example,
+set `depth_format`, `depth_pointcloud_stride`, `max_decode_latency_ms` or
+`allow_sample_endpoint_fallback` from your own launch wrapper when needed.
 
 Stream aliases:
 
@@ -343,9 +347,10 @@ Point clouds and odometry can be viewed in RViz:
 ## Continuous Integration
 
 Maintainer CI validates ROS1 Noetic and ROS2 Foxy builds on both x86_64 and
-arm64 Linux hosts. Merge request checks build the matching Docker test image
-locally on each platform and run bridge tests inside it; release-line pipelines
-may also publish reusable CI images for the maintainers.
+arm64 Linux hosts. Normal pipelines only compile and test the current ROS
+packages with the prebuilt CI images selected by `CI_IMAGE_TAG_SUFFIX`. Docker
+image refresh jobs are manual maintenance jobs and should only be run when the
+CI Dockerfile or base dependency set changes.
 
 ROS bridge jobs use the default compiler from each ROS build environment; Host
 SDK binaries should continue to be rebuilt with GCC 9 before being refreshed in

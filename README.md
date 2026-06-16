@@ -170,7 +170,7 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
 ROS2 all streams:
 
 ```bash
-ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge.launch.py \
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
   host:=<device-ip>
 ```
 
@@ -181,9 +181,9 @@ are fixed under `/orbvi`.
 
 | Scenario | ROS1 command | ROS2 command | Expected first check |
 | --- | --- | --- | --- |
-| Basic all-data bridge | `roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom` |
-| Camera, depth and VIO | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge_visual.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
-| Camera, depth, VIO and MID360 | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge_mid360.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
+| Basic all-data bridge | `roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom` |
+| Camera, depth and VIO | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge_visual.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
+| Camera, depth, VIO and MID360 | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
 
 Use `orbvi_ros_bridge_visual.launch` when the host only needs visual raw data,
 depth and VIO. Use `orbvi_ros_bridge_mid360.launch` when the same visual
@@ -202,7 +202,7 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
 ROS2:
 
 ```bash
-ros2 launch orbvi_ros_bridge ros2/orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
 ```
 
 Check topic presence and type from the bridge host:
@@ -273,9 +273,9 @@ Launch files are grouped by ROS version and runtime scenario.
 | `orbvi_ros_bridge.launch` | ROS1 | Default full raw-data entry: visual data, depth, VIO and MID360 |
 | `orbvi_ros_bridge_visual.launch` | ROS1 | Visual entry: four raw decoded images, rectified images, device IMU, disparity, depth and VIO |
 | `orbvi_ros_bridge_mid360.launch` | ROS1 | Visual entry plus MID360 point cloud and MID360 IMU |
-| `ros2/orbvi_ros_bridge.launch.py` | ROS2 | Default full raw-data entry: visual data, depth, VIO and MID360 |
-| `ros2/orbvi_ros_bridge_visual.launch.py` | ROS2 | Visual entry: four raw decoded images, rectified images, device IMU, disparity, depth and VIO |
-| `ros2/orbvi_ros_bridge_mid360.launch.py` | ROS2 | Visual entry plus MID360 point cloud and MID360 IMU |
+| `orbvi_ros_bridge.launch.py` | ROS2 | Default full raw-data entry: visual data, depth, VIO and MID360 |
+| `orbvi_ros_bridge_visual.launch.py` | ROS2 | Visual entry: four raw decoded images, rectified images, device IMU, disparity, depth and VIO |
+| `orbvi_ros_bridge_mid360.launch.py` | ROS2 | Visual entry plus MID360 point cloud and MID360 IMU |
 
 Common parameters:
 

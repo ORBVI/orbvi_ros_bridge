@@ -29,10 +29,10 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 
 | Topic | ROS1 类型 | 说明 |
 | --- | --- | --- |
-| `/orbvi/raw/camera_<id>/compressed` | `sensor_msgs/CompressedImage` | 原始鱼眼 MJPEG |
 | `/orbvi/raw/camera_<id>/image` | `sensor_msgs/Image` | 开启 decoded 时发布的 BGR 图像 |
-| `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/compressed` | `sensor_msgs/CompressedImage` | 校正后的 stereo pair 图像 |
+| `/orbvi/raw/camera_<id>/image/compressed` | `sensor_msgs/CompressedImage` | 原始鱼眼压缩图像 transport |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | 开启 decoded 时发布的校正图像 |
+| `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | 校正后的 stereo pair 压缩图像 transport |
 | `/orbvi/imu` | `sensor_msgs/Imu` | 设备 IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 点云流 |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU 流 |
@@ -72,6 +72,7 @@ sudo apt install -y \
   ros-${ROS_DISTRO}-std-msgs \
   ros-${ROS_DISTRO}-sensor-msgs \
   ros-${ROS_DISTRO}-nav-msgs \
+  ros-${ROS_DISTRO}-compressed-image-transport \
   ros-${ROS_DISTRO}-rosidl-default-generators
 ```
 
@@ -250,13 +251,13 @@ Topic 名称固定在 `/orbvi` 下。
 ROS1 图像：
 
 ```bash
-rosrun rqt_image_view rqt_image_view /orbvi/raw/camera_0/compressed
+rosrun rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
 ```
 
 ROS2 图像：
 
 ```bash
-ros2 run rqt_image_view rqt_image_view /orbvi/raw/camera_0/compressed
+ros2 run rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
 ```
 
 点云和里程计可在 RViz 中查看：

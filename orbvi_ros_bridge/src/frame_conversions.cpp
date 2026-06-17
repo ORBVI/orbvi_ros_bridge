@@ -215,9 +215,9 @@ bool ReadPodArray(
 std::string StreamTopicSuffix(orbvi_sdk::StreamId stream) {
   switch (stream) {
     case orbvi_sdk::StreamId::RawFisheye:
-      return "raw/compressed";
+      return "raw/image/compressed";
     case orbvi_sdk::StreamId::RectifiedFisheye:
-      return "rectified/compressed";
+      return "rectified/image/compressed";
     case orbvi_sdk::StreamId::Imu:
       return "imu";
     case orbvi_sdk::StreamId::LidarPointCloud:
@@ -522,7 +522,7 @@ bool MakeSingleCompressedImage(
     const std::string camera_id =
         SanitizeTopicToken(MetadataValue(metadata, "camera_id"), "");
     if (!camera_id.empty()) {
-      out->topic_suffix = "raw/camera_" + camera_id + "/compressed";
+      out->topic_suffix = "raw/camera_" + camera_id + "/image/compressed";
     }
   } else if (frame.stream_id == orbvi_sdk::StreamId::RectifiedFisheye) {
     std::uint32_t pair_id = 0;
@@ -530,7 +530,7 @@ bool MakeSingleCompressedImage(
     if (!ResolveRectifiedPairSide(metadata, &pair_id, &side)) {
       return false;
     }
-    out->topic_suffix = RectifiedTopicSuffix(pair_id, side, "compressed");
+    out->topic_suffix = RectifiedTopicSuffix(pair_id, side, "image/compressed");
     out->message.header.frame_id = RectifiedFrameId(pair_id, side);
     if (out->topic_suffix.empty() || out->message.header.frame_id.empty()) {
       return false;
@@ -727,7 +727,7 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
       const std::string camera_id = SanitizeTopicToken(
           MetadataValue(metadata, CameraMetadataKey(i, "camera_id")),
           std::to_string(i));
-      output.topic_suffix = "raw/camera_" + camera_id + "/compressed";
+      output.topic_suffix = "raw/camera_" + camera_id + "/image/compressed";
       outputs.push_back(std::move(output));
     }
     return outputs;
@@ -765,7 +765,7 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
       if (ParseU32(MetadataValue(metadata, RectifiedMetadataKey(i, "pair_id")), &pair_id) &&
           NormalizeRectifiedSide(MetadataValue(metadata, RectifiedMetadataKey(i, "side")), &side) &&
           !RectifiedDirectionForPairSide(pair_id, side).empty()) {
-        output.topic_suffix = RectifiedTopicSuffix(pair_id, side, "compressed");
+        output.topic_suffix = RectifiedTopicSuffix(pair_id, side, "image/compressed");
         output.message.header.frame_id = RectifiedFrameId(pair_id, side);
       }
       if (output.topic_suffix.empty() || output.message.header.frame_id.empty()) {

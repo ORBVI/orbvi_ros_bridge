@@ -30,10 +30,10 @@ ROS1 and ROS2 use the same topic names. ROS2 message packages use the matching
 
 | Topic | ROS1 type | Notes |
 | --- | --- | --- |
-| `/orbvi/raw/camera_<id>/compressed` | `sensor_msgs/CompressedImage` | Raw fisheye MJPEG |
 | `/orbvi/raw/camera_<id>/image` | `sensor_msgs/Image` | Decoded BGR image when enabled |
-| `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/compressed` | `sensor_msgs/CompressedImage` | Rectified stereo pair images |
+| `/orbvi/raw/camera_<id>/image/compressed` | `sensor_msgs/CompressedImage` | Raw fisheye compressed image transport |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | Decoded rectified image when enabled |
+| `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | Rectified stereo pair compressed image transport |
 | `/orbvi/imu` | `sensor_msgs/Imu` | Device IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 point cloud stream |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU stream |
@@ -73,6 +73,7 @@ sudo apt install -y \
   ros-${ROS_DISTRO}-std-msgs \
   ros-${ROS_DISTRO}-sensor-msgs \
   ros-${ROS_DISTRO}-nav-msgs \
+  ros-${ROS_DISTRO}-compressed-image-transport \
   ros-${ROS_DISTRO}-rosidl-default-generators
 ```
 
@@ -252,13 +253,13 @@ Topic names are fixed under `/orbvi`.
 ROS1 images:
 
 ```bash
-rosrun rqt_image_view rqt_image_view /orbvi/raw/camera_0/compressed
+rosrun rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
 ```
 
 ROS2 images:
 
 ```bash
-ros2 run rqt_image_view rqt_image_view /orbvi/raw/camera_0/compressed
+ros2 run rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
 ```
 
 Point clouds and odometry can be viewed in RViz:

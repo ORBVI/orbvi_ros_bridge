@@ -125,21 +125,21 @@ TEST(OrbviRosBridgeCompressedImages, RectifiedBundleRoutesToDirectionTopics) {
 
   ASSERT_EQ(outputs.size(), 8u);
   EXPECT_TRUE(skipped_reason.empty());
-  EXPECT_EQ(outputs[0].topic_suffix, "rectified/front/left/compressed");
+  EXPECT_EQ(outputs[0].topic_suffix, "rectified/front/left/image/compressed");
   EXPECT_EQ(outputs[0].message.header.frame_id, "orbvi/rectified/front/left");
-  EXPECT_EQ(outputs[1].topic_suffix, "rectified/right/right/compressed");
+  EXPECT_EQ(outputs[1].topic_suffix, "rectified/right/right/image/compressed");
   EXPECT_EQ(outputs[1].message.header.frame_id, "orbvi/rectified/right/right");
-  EXPECT_EQ(outputs[2].topic_suffix, "rectified/right/left/compressed");
+  EXPECT_EQ(outputs[2].topic_suffix, "rectified/right/left/image/compressed");
   EXPECT_EQ(outputs[2].message.header.frame_id, "orbvi/rectified/right/left");
-  EXPECT_EQ(outputs[3].topic_suffix, "rectified/rear/right/compressed");
+  EXPECT_EQ(outputs[3].topic_suffix, "rectified/rear/right/image/compressed");
   EXPECT_EQ(outputs[3].message.header.frame_id, "orbvi/rectified/rear/right");
-  EXPECT_EQ(outputs[4].topic_suffix, "rectified/rear/left/compressed");
+  EXPECT_EQ(outputs[4].topic_suffix, "rectified/rear/left/image/compressed");
   EXPECT_EQ(outputs[4].message.header.frame_id, "orbvi/rectified/rear/left");
-  EXPECT_EQ(outputs[5].topic_suffix, "rectified/left/right/compressed");
+  EXPECT_EQ(outputs[5].topic_suffix, "rectified/left/right/image/compressed");
   EXPECT_EQ(outputs[5].message.header.frame_id, "orbvi/rectified/left/right");
-  EXPECT_EQ(outputs[6].topic_suffix, "rectified/left/left/compressed");
+  EXPECT_EQ(outputs[6].topic_suffix, "rectified/left/left/image/compressed");
   EXPECT_EQ(outputs[6].message.header.frame_id, "orbvi/rectified/left/left");
-  EXPECT_EQ(outputs[7].topic_suffix, "rectified/front/right/compressed");
+  EXPECT_EQ(outputs[7].topic_suffix, "rectified/front/right/image/compressed");
   EXPECT_EQ(outputs[7].message.header.frame_id, "orbvi/rectified/front/right");
   for (const auto& output : outputs) {
     EXPECT_FALSE(Contains(output.topic_suffix, "view_"));
@@ -164,7 +164,7 @@ TEST(OrbviRosBridgeCompressedImages, SingleRectifiedFrameUsesDirectionFrameId) {
 
   ASSERT_EQ(outputs.size(), 1u);
   EXPECT_TRUE(skipped_reason.empty());
-  EXPECT_EQ(outputs.front().topic_suffix, "rectified/rear/left/compressed");
+  EXPECT_EQ(outputs.front().topic_suffix, "rectified/rear/left/image/compressed");
   EXPECT_EQ(outputs.front().message.header.frame_id, "orbvi/rectified/rear/left");
 }
 

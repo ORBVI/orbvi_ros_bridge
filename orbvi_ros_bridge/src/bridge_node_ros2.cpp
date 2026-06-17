@@ -3,13 +3,17 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -27,6 +31,12 @@
       *node_->get_clock(), \
       static_cast<int>((period_sec) * 1000.0), \
       __VA_ARGS__)
+#define ROS_INFO_THROTTLE(period_sec, ...) \
+  RCLCPP_INFO_THROTTLE( \
+      node_->get_logger(), \
+      *node_->get_clock(), \
+      static_cast<int>((period_sec) * 1000.0), \
+      __VA_ARGS__)
 
 namespace orbvi_ros_bridge {
 namespace {
@@ -35,6 +45,7 @@ struct BridgeConfig {
   std::string host = "127.0.0.1";
   std::uint16_t control_port = 18088;
   std::string topic_prefix = "/orbvi";
+  std::vector<std::string> raw_camera_ids;
   std::vector<orbvi_sdk::StreamId> streams = {
       orbvi_sdk::StreamId::RawFisheye,
       orbvi_sdk::StreamId::RectifiedFisheye,
@@ -52,6 +63,8 @@ struct BridgeConfig {
   bool publish_depth = false;
   bool publish_depth_viz = true;
   bool publish_depth_pointcloud = true;
+  bool sensor_data_best_effort = true;
+  bool log_delivery_stats = false;
   orbvi_sdk::DepthGenerationOptions depth_options;
   DepthVisualizationOptions depth_visualization_options;
   orbvi_sdk::PointCloudGenerationOptions pointcloud_options;
@@ -59,10 +72,12 @@ struct BridgeConfig {
   std::uint32_t connect_retry_count = 4;
   std::uint32_t connect_retry_delay_ms = 1000;
   std::uint32_t first_frame_timeout_ms = 5000;
-  std::size_t max_receive_queue_depth = 8;
-  std::size_t max_decode_queue_depth = 8;
+  std::size_t max_receive_queue_depth = 64;
+  std::size_t max_decode_queue_depth = 64;
+  std::size_t max_publish_queue_depth = 64;
   std::uint32_t max_decode_latency_ms = 100;
-  std::uint32_t queue_size = 4;
+  std::uint32_t queue_size = 10;
+  std::uint32_t publish_worker_threads = 8;
   orbvi_sdk::DecodeMode decode_mode = orbvi_sdk::DecodeMode::RawAndDecoded;
 };
 
@@ -257,6 +272,7 @@ class BridgeNode::Impl {
       return false;
     }
 
+    StartPublishWorkers();
     PrepareDepthPublisher();
 
     for (const auto stream : config_.streams) {
@@ -281,6 +297,7 @@ class BridgeNode::Impl {
       client_->disconnect();
       client_.reset();
     }
+    StopPublishWorkers();
     std::lock_guard<std::mutex> lock(publishers_mutex_);
     publishers_.clear();
   }
@@ -325,6 +342,16 @@ class BridgeNode::Impl {
 
     private_node_.param<std::string>("topic_prefix", config.topic_prefix, config.topic_prefix);
     config.topic_prefix = NormalizeTopicPrefix(config.topic_prefix);
+    std::string raw_camera_ids;
+    private_node_.param<std::string>("raw_camera_ids", raw_camera_ids, raw_camera_ids);
+    config.raw_camera_ids = SplitCsv(raw_camera_ids);
+    for (auto& raw_camera_id : config.raw_camera_ids) {
+      raw_camera_id = NormalizeToken(raw_camera_id);
+      const std::string prefix = "camera_";
+      if (raw_camera_id.find(prefix) == 0) {
+        raw_camera_id = raw_camera_id.substr(prefix.size());
+      }
+    }
     private_node_.param<bool>(
         "require_streaming_transport",
         config.require_streaming_transport,
@@ -344,6 +371,14 @@ class BridgeNode::Impl {
         "publish_compressed_images",
         config.publish_compressed_images,
         config.publish_compressed_images);
+    private_node_.param<bool>(
+        "sensor_data_best_effort",
+        config.sensor_data_best_effort,
+        config.sensor_data_best_effort);
+    private_node_.param<bool>(
+        "log_delivery_stats",
+        config.log_delivery_stats,
+        config.log_delivery_stats);
 
     int queue_size = static_cast<int>(config.queue_size);
     private_node_.param<int>("queue_size", queue_size, queue_size);
@@ -358,6 +393,19 @@ class BridgeNode::Impl {
     private_node_.param<int>("max_decode_queue_depth", decode_depth, decode_depth);
     config.max_decode_queue_depth =
         decode_depth <= 0 ? 1u : static_cast<std::size_t>(decode_depth);
+
+    int publish_queue_depth = static_cast<int>(config.max_publish_queue_depth);
+    private_node_.param<int>(
+        "max_publish_queue_depth",
+        publish_queue_depth,
+        publish_queue_depth);
+    config.max_publish_queue_depth =
+        publish_queue_depth <= 0 ? 1u : static_cast<std::size_t>(publish_queue_depth);
+
+    int publish_workers = static_cast<int>(config.publish_worker_threads);
+    private_node_.param<int>("publish_worker_threads", publish_workers, publish_workers);
+    config.publish_worker_threads =
+        publish_workers < 0 ? 0u : static_cast<std::uint32_t>(publish_workers);
 
     int decode_latency = static_cast<int>(config.max_decode_latency_ms);
     private_node_.param<int>("max_decode_latency_ms", decode_latency, decode_latency);
@@ -627,15 +675,136 @@ class BridgeNode::Impl {
     std::lock_guard<std::mutex> lock(publishers_mutex_);
     auto it = publishers_.find(topic);
     if (it == publishers_.end()) {
-      auto publisher =
-          node_->create_publisher<MessageT>(topic, rclcpp::QoS(config_.queue_size));
+      auto qos = rclcpp::QoS(config_.queue_size);
+      if (config_.sensor_data_best_effort && IsSensorDataMessage<MessageT>()) {
+        qos.best_effort();
+      }
+      auto publisher = node_->create_publisher<MessageT>(topic, qos);
       it = publishers_.emplace(topic, publisher).first;
     }
     return std::dynamic_pointer_cast<rclcpp::Publisher<MessageT>>(it->second);
   }
 
+  template <typename MessageT>
+  void PublishMessage(const std::string& topic, MessageT message) {
+    auto publisher = Publisher<MessageT>(topic);
+    if (config_.publish_worker_threads > 0 && IsSensorDataMessage<MessageT>()) {
+      auto shared_message = std::make_shared<MessageT>(std::move(message));
+      EnqueuePublishTask([publisher, shared_message]() {
+        publisher->publish(*shared_message);
+      });
+      return;
+    }
+    publisher->publish(message);
+  }
+
+  template <typename MessageT>
+  static constexpr bool IsSensorDataMessage() {
+    return std::is_same<MessageT, sensor_msgs::msg::CompressedImage>::value ||
+           std::is_same<MessageT, sensor_msgs::msg::Image>::value ||
+           std::is_same<MessageT, sensor_msgs::msg::Imu>::value ||
+           std::is_same<MessageT, sensor_msgs::msg::PointCloud2>::value ||
+           std::is_same<MessageT, livox_ros_driver2::msg::CustomMsg>::value;
+  }
+
+  void StartPublishWorkers() {
+    StopPublishWorkers();
+    if (config_.publish_worker_threads == 0) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
+      publish_workers_stop_ = false;
+      publish_queue_.clear();
+      publish_tasks_dropped_ = 0;
+    }
+    publish_workers_.reserve(config_.publish_worker_threads);
+    for (std::uint32_t i = 0; i < config_.publish_worker_threads; ++i) {
+      publish_workers_.emplace_back([this]() { PublishWorkerLoop(); });
+    }
+  }
+
+  void StopPublishWorkers() {
+    {
+      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
+      publish_workers_stop_ = true;
+      publish_queue_.clear();
+    }
+    publish_queue_cv_.notify_all();
+    for (auto& worker : publish_workers_) {
+      if (worker.joinable()) {
+        worker.join();
+      }
+    }
+    publish_workers_.clear();
+    {
+      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
+      publish_workers_stop_ = false;
+    }
+  }
+
+  void EnqueuePublishTask(std::function<void()> task) {
+    {
+      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
+      if (publish_workers_stop_) {
+        return;
+      }
+      if (publish_queue_.size() >= config_.max_publish_queue_depth) {
+        publish_queue_.pop_front();
+        ++publish_tasks_dropped_;
+        ROS_WARN_THROTTLE(
+            2.0,
+            "ROS publish queue full; dropped oldest sensor publish task "
+            "(dropped=%llu depth=%zu)",
+            static_cast<unsigned long long>(publish_tasks_dropped_),
+            config_.max_publish_queue_depth);
+      }
+      publish_queue_.push_back(std::move(task));
+    }
+    publish_queue_cv_.notify_one();
+  }
+
+  void PublishWorkerLoop() {
+    while (true) {
+      std::function<void()> task;
+      {
+        std::unique_lock<std::mutex> lock(publish_queue_mutex_);
+        publish_queue_cv_.wait(lock, [this]() {
+          return publish_workers_stop_ || !publish_queue_.empty();
+        });
+        if (publish_workers_stop_ && publish_queue_.empty()) {
+          return;
+        }
+        task = std::move(publish_queue_.front());
+        publish_queue_.pop_front();
+      }
+      task();
+    }
+  }
+
   void PublishDelivery(const orbvi_sdk::FrameDelivery& delivery) {
     const auto frame = delivery.frame.view();
+    if (config_.log_delivery_stats &&
+        (frame.stream_id == orbvi_sdk::StreamId::RawFisheye ||
+         frame.stream_id == orbvi_sdk::StreamId::RectifiedFisheye)) {
+      const auto& stats = delivery.stats;
+      ROS_INFO_THROTTLE(
+          2.0,
+          "Host SDK delivery stream=%s observed=%.2fHz delivered=%llu dropped=%llu "
+          "skipped_decodes=%llu decode_latency=%.2fms max_decode_latency=%.2fms "
+          "receive_q=%zu decode_q=%zu overflow=%llu blocked=%s",
+          orbvi_sdk::ToString(frame.stream_id),
+          stats.observed_rate_hz,
+          static_cast<unsigned long long>(stats.delivered_frames),
+          static_cast<unsigned long long>(stats.dropped_frames),
+          static_cast<unsigned long long>(stats.skipped_decodes),
+          stats.decode_latency_ms,
+          stats.max_decode_latency_ms,
+          stats.receive_queue_depth,
+          stats.decode_queue_depth,
+          static_cast<unsigned long long>(stats.overflow_events),
+          stats.blocked_reason.c_str());
+    }
     switch (frame.stream_id) {
       case orbvi_sdk::StreamId::RawFisheye:
       case orbvi_sdk::StreamId::RectifiedFisheye:
@@ -670,24 +839,26 @@ class BridgeNode::Impl {
       std::string skipped_reason;
       for (const auto& output :
            MakeCompressedImageMessages(frame, config_.split_multi_image_frames, &skipped_reason)) {
-        Publisher<sensor_msgs::msg::CompressedImage>(
-            JoinTopic(config_.topic_prefix, output.topic_suffix))
-            ->publish(output.message);
+        PublishMessage(
+            JoinTopic(config_.topic_prefix, output.topic_suffix),
+            output.message);
       }
       if (!skipped_reason.empty()) {
         ROS_WARN_THROTTLE(5.0, "%s", skipped_reason.c_str());
       }
     }
     if (config_.publish_decoded_images) {
-      const auto decoded_outputs = MakeDecodedImageMessages(frame.stream_id, delivery);
+      const auto decoded_outputs =
+          MakeDecodedImageMessages(frame.stream_id, delivery, config_.raw_camera_ids);
       if (decoded_outputs.empty()) {
         ROS_WARN_THROTTLE(
             5.0,
             "Decoded image output was requested, but Host SDK did not deliver decoded image data");
       }
       for (const auto& output : decoded_outputs) {
-        Publisher<sensor_msgs::msg::Image>(JoinTopic(config_.topic_prefix, output.topic_suffix))
-            ->publish(output.message);
+        PublishMessage(
+            JoinTopic(config_.topic_prefix, output.topic_suffix),
+            output.message);
       }
     }
   }
@@ -700,8 +871,7 @@ class BridgeNode::Impl {
     }
     const std::string suffix =
         frame.stream_id == orbvi_sdk::StreamId::LidarImu ? "lidar/imu" : "imu";
-    Publisher<sensor_msgs::msg::Imu>(JoinTopic(config_.topic_prefix, suffix))
-        ->publish(message);
+    PublishMessage(JoinTopic(config_.topic_prefix, suffix), std::move(message));
   }
 
   void PublishLivox(const orbvi_sdk::FrameView& frame) {
@@ -710,8 +880,7 @@ class BridgeNode::Impl {
       ROS_WARN_THROTTLE(5.0, "Failed to parse Host SDK Livox payload");
       return;
     }
-    Publisher<livox_ros_driver2::msg::CustomMsg>(JoinTopic(config_.topic_prefix, "lidar/custom"))
-        ->publish(message);
+    PublishMessage(JoinTopic(config_.topic_prefix, "lidar/custom"), std::move(message));
   }
 
   void PublishDisparity(const orbvi_sdk::FrameView& frame) {
@@ -720,8 +889,7 @@ class BridgeNode::Impl {
       ROS_WARN_THROTTLE(5.0, "Failed to parse Host SDK disparity payload");
       return;
     }
-    Publisher<sensor_msgs::msg::Image>(JoinTopic(config_.topic_prefix, "disparity"))
-        ->publish(message);
+    PublishMessage(JoinTopic(config_.topic_prefix, "disparity"), std::move(message));
     PublishDepth(frame);
   }
 
@@ -744,8 +912,7 @@ class BridgeNode::Impl {
       ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth image to ROS Image");
       return;
     }
-    Publisher<sensor_msgs::msg::Image>(JoinTopic(config_.topic_prefix, "depth"))
-        ->publish(message);
+    PublishMessage(JoinTopic(config_.topic_prefix, "depth"), std::move(message));
     PublishDepthVisualization(depth.view(), frame);
   }
 
@@ -759,8 +926,7 @@ class BridgeNode::Impl {
               source_disparity,
               config_.depth_visualization_options,
               &message)) {
-        Publisher<sensor_msgs::msg::Image>(JoinTopic(config_.topic_prefix, "depth/viz"))
-            ->publish(message);
+        PublishMessage(JoinTopic(config_.topic_prefix, "depth/viz"), std::move(message));
       } else {
         ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth image to visualization Image");
       }
@@ -777,8 +943,7 @@ class BridgeNode::Impl {
       }
       sensor_msgs::msg::PointCloud2 message;
       if (MakePointCloudMessage(cloud_result.value(), &message)) {
-        Publisher<sensor_msgs::msg::PointCloud2>(JoinTopic(config_.topic_prefix, "depth/points"))
-            ->publish(message);
+        PublishMessage(JoinTopic(config_.topic_prefix, "depth/points"), std::move(message));
       } else {
         ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth image to visualization PointCloud2");
       }
@@ -808,6 +973,12 @@ class BridgeNode::Impl {
   std::unique_ptr<orbvi_sdk::Client> client_;
   std::optional<orbvi_sdk::DepthCalibration> depth_calibration_;
   std::vector<orbvi_sdk::SubscriptionHandle> subscriptions_;
+  std::mutex publish_queue_mutex_;
+  std::condition_variable publish_queue_cv_;
+  std::deque<std::function<void()>> publish_queue_;
+  std::vector<std::thread> publish_workers_;
+  bool publish_workers_stop_ = false;
+  std::uint64_t publish_tasks_dropped_ = 0;
   std::mutex publishers_mutex_;
   std::map<std::string, rclcpp::PublisherBase::SharedPtr> publishers_;
 };

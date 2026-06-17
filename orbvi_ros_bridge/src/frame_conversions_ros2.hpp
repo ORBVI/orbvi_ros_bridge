@@ -44,7 +44,8 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
 
 std::vector<ImageOutput> MakeDecodedImageMessages(
     orbvi_sdk::StreamId stream,
-    const orbvi_sdk::FrameDelivery& delivery);
+    const orbvi_sdk::FrameDelivery& delivery,
+    const std::vector<std::string>& raw_camera_ids = {});
 
 bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Image* out);
 bool MakeDepthImage(const orbvi_sdk::DepthMapView& depth, sensor_msgs::msg::Image* out);

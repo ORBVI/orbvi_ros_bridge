@@ -787,11 +787,17 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
 
 std::vector<ImageOutput> MakeDecodedImageMessages(
     orbvi_sdk::StreamId stream,
-    const orbvi_sdk::FrameDelivery& delivery) {
+    const orbvi_sdk::FrameDelivery& delivery,
+    const std::vector<std::string>& raw_camera_ids) {
   std::vector<ImageOutput> outputs;
   const auto append = [&](const orbvi_sdk::DecodedImageView& decoded, std::size_t index) {
     if (decoded.data == nullptr || decoded.data_size == 0 ||
         decoded.width == 0 || decoded.height == 0 || decoded.stride == 0) {
+      return;
+    }
+    const std::string token = SanitizeTopicToken(decoded.camera_id, std::to_string(index));
+    if (stream == orbvi_sdk::StreamId::RawFisheye && !raw_camera_ids.empty() &&
+        std::find(raw_camera_ids.begin(), raw_camera_ids.end(), token) == raw_camera_ids.end()) {
       return;
     }
     ImageOutput output;
@@ -802,7 +808,6 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
     output.message.is_bigendian = 0;
     output.message.step = decoded.stride;
     output.message.data.assign(decoded.data, decoded.data + decoded.data_size);
-    const std::string token = SanitizeTopicToken(decoded.camera_id, std::to_string(index));
     if (stream == orbvi_sdk::StreamId::RawFisheye) {
       output.topic_suffix = "raw/camera_" + token + "/image";
     } else {

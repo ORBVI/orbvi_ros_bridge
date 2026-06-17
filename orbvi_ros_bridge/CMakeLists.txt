@@ -305,6 +305,10 @@ else()
     DESTINATION share/${PROJECT_NAME}/launch
     FILES_MATCHING PATTERN "*.launch.py"
   )
+  install(DIRECTORY config/
+    DESTINATION share/${PROJECT_NAME}/config
+    FILES_MATCHING PATTERN "*.xml"
+  )
 
   ament_add_gtest(test_orbvi_ros_bridge_host_sdk_link_ros2 test/test_host_sdk_link_ros2.cpp)
   if(TARGET test_orbvi_ros_bridge_host_sdk_link_ros2)

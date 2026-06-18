@@ -10,6 +10,7 @@
 #include "orbvi_sdk/frame.hpp"
 #include "orbvi_sdk/image.hpp"
 #include "orbvi_sdk/depth.hpp"
+#include "orbvi_sdk/panorama.hpp"
 
 namespace orbvi_sdk {
 
@@ -176,6 +177,7 @@ using FrameCallback = std::function<void(const FrameDelivery&)>;
 
 struct SubscriptionState;
 struct DepthSubscriptionState;
+struct PanoramaSubscriptionState;
 
 class SubscriptionHandle {
  public:
@@ -213,6 +215,24 @@ class DepthSubscriptionHandle {
   std::shared_ptr<DepthSubscriptionState> state_;
 };
 
+class PanoramaSubscriptionHandle {
+ public:
+  PanoramaSubscriptionHandle() = default;
+  explicit PanoramaSubscriptionHandle(std::shared_ptr<PanoramaSubscriptionState> state);
+  PanoramaSubscriptionHandle(const PanoramaSubscriptionHandle&) = delete;
+  PanoramaSubscriptionHandle& operator=(const PanoramaSubscriptionHandle&) = delete;
+  PanoramaSubscriptionHandle(PanoramaSubscriptionHandle&& other) noexcept;
+  PanoramaSubscriptionHandle& operator=(PanoramaSubscriptionHandle&& other) noexcept;
+  ~PanoramaSubscriptionHandle();
+
+  void stop();
+  bool active() const;
+  PanoramaSubscriptionStats stats() const;
+
+ private:
+  std::shared_ptr<PanoramaSubscriptionState> state_;
+};
+
 class Client {
  public:
   explicit Client(ClientOptions options);
@@ -248,6 +268,11 @@ class Client {
   Result<DepthSubscriptionHandle> subscribeDepthMap(
       DepthSubscribeOptions options,
       DepthFrameCallback callback);
+  Result<OwnedPanoramaImage> getPanorama(const PanoramaStitchOptions& options = {});
+  Result<PanoramaSubscriptionHandle> subscribePanorama(PanoramaFrameCallback callback);
+  Result<PanoramaSubscriptionHandle> subscribePanorama(
+      PanoramaSubscribeOptions options,
+      PanoramaFrameCallback callback);
 
  private:
   class Impl;

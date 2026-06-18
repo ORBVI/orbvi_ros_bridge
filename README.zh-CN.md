@@ -3,8 +3,8 @@
 [English](README.md)
 
 ORBVI ROS Bridge 通过 ORBVI Host SDK 将 ORBVI 设备数据发布到 ROS1 或 ROS2。
-它面向需要在 Linux 主机上获取相机、IMU、MID360 LiDAR、视差、深度和 VIO
-topic 的应用开发者。
+它面向需要在 Linux 主机上获取相机、IMU、MID360 LiDAR、视差、Host 侧深度、
+Host 侧全景和 VIO topic 的应用开发者。
 
 仓库包含：
 
@@ -33,6 +33,7 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 | `/orbvi/raw/camera_<id>/image/compressed` | `sensor_msgs/CompressedImage` | 原始鱼眼压缩图像 transport |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | 开启 decoded 时发布的校正图像 |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | 校正后的 stereo pair 压缩图像 transport |
+| `/orbvi/pano/image` | `sensor_msgs/Image` | `streams` 包含 `pano` 时，由 Host SDK 从 `raw_fisheye_stream` 拼接出的全景图 |
 | `/orbvi/imu` | `sensor_msgs/Imu` | 设备 IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 点云流 |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU 流 |
@@ -115,11 +116,25 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
   host:=<device-ip>
 ```
 
+可选 Host 侧全景：
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
+```
+
 ROS2 全流：
 
 ```bash
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
   host:=<device-ip>
+```
+
+可选 Host 侧全景：
+
+```bash
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
 ```
 
 ## 场景速查
@@ -241,6 +256,19 @@ Launch 文件按 ROS 版本和运行场景分组。
 | `connect_timeout_ms` | `2000` | 首次 Host SDK 连接每次尝试的超时时间 |
 | `connect_retry_count` | `4` | 首次连接失败后的重试次数 |
 | `connect_retry_delay_ms` | `1000` | Host SDK 连接重试间隔 |
+| `pano_profile` | `baseline` | 全景测试档位：`baseline`、`ghost_suppression`/`balanced` 或 `primary_only` |
+| `pano_width` | `2048` | `streams` 包含 `pano` 时 Host SDK 全景输出宽度 |
+| `pano_height` | `1024` | `streams` 包含 `pano` 时 Host SDK 全景输出高度 |
+| `pano_fov_half_deg` | `95.0` | Host SDK 全景拼接使用的水平半视场角 |
+| `pano_seam_blend_px` | `32` | Host SDK 全景拼接接缝融合宽度 |
+| `pano_seam_mode` | `fixed` | Host SDK 全景接缝模式：`fixed` 或 `dynamic`/`dynamic_programming`/`dp` |
+| `pano_dp_seam_band_px` | `96` | 动态规划接缝搜索带宽，单位像素 |
+| `pano_dp_seam_smoothness` | `8.0` | 动态规划接缝搜索使用的平滑惩罚 |
+| `pano_seam_avoidance_penalty` | `220.0` | 启用动态接缝选择时，接缝避让 mask 使用的惩罚值 |
+| `pano_blend` | `feather` | Host SDK 全景融合模式：`feather` 或 `primary_only` |
+| `pano_photometric_align` | `true` | 是否启用 Host SDK 全景逐帧曝光对齐 |
+| `pano_seam_ghost_suppression` | `false` | 是否启用 Host SDK 接缝局部重影抑制 |
+| `pano_seam_ghost_threshold` | `80.0` | 接缝重影抑制使用的颜色/亮度差异阈值 |
 | `use_fastdds_shm` | `true` | ROS2 bridge 进程是否启用内置 Fast DDS SHM profile |
 | `fastdds_shm_profile` | 内置 XML | ROS2 Fast DDS SHM profile 路径，可用自定义 profile 覆盖 |
 

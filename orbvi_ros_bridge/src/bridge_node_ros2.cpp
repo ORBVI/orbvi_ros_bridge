@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "frame_conversions_ros2.hpp"
+#include "panorama_options.hpp"
 
 #define ROS_ERROR_STREAM(expr) RCLCPP_ERROR_STREAM(node_->get_logger(), expr)
 #define ROS_WARN_STREAM(expr) RCLCPP_WARN_STREAM(node_->get_logger(), expr)
@@ -63,11 +64,13 @@ struct BridgeConfig {
   bool publish_depth = false;
   bool publish_depth_viz = true;
   bool publish_depth_pointcloud = true;
+  bool publish_panorama = false;
   bool sensor_data_best_effort = true;
   bool log_delivery_stats = false;
   orbvi_sdk::DepthGenerationOptions depth_options;
   DepthVisualizationOptions depth_visualization_options;
   orbvi_sdk::PointCloudGenerationOptions pointcloud_options;
+  orbvi_sdk::PanoramaSubscribeOptions panorama_options;
   std::uint32_t connect_timeout_ms = 2000;
   std::uint32_t connect_retry_count = 4;
   std::uint32_t connect_retry_delay_ms = 1000;
@@ -170,6 +173,49 @@ bool ParsePointCloudFrame(const std::string& value, orbvi_sdk::PointCloudFrame* 
   }
   if (token == "tile" || token == "tile_optical" || token == "optical") {
     *out = orbvi_sdk::PointCloudFrame::TileOptical;
+    return true;
+  }
+  return false;
+}
+
+bool ParsePanoramaBlendMode(const std::string& value, orbvi_sdk::PanoramaBlendMode* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  const std::string token = NormalizeToken(value);
+  if (token == "feather") {
+    *out = orbvi_sdk::PanoramaBlendMode::Feather;
+    return true;
+  }
+  if (token == "primary" || token == "primary_only" || token == "none") {
+    *out = orbvi_sdk::PanoramaBlendMode::PrimaryOnly;
+    return true;
+  }
+  return false;
+}
+
+bool ApplyPanoramaProfile(const std::string& value, orbvi_sdk::PanoramaStitchOptions* options) {
+  if (options == nullptr) {
+    return false;
+  }
+  const std::string token = NormalizeToken(value);
+  if (token.empty() || token == "baseline" || token == "quality") {
+    return true;
+  }
+  if (token == "ghost_suppression" || token == "ghost" || token == "balanced") {
+    options->blend_mode = orbvi_sdk::PanoramaBlendMode::Feather;
+    options->seam_blend_px = 32;
+    options->photometric_align = true;
+    options->seam_mode = orbvi_sdk::PanoramaSeamMode::DynamicProgramming;
+    options->seam_ghost_suppression = true;
+    options->seam_ghost_threshold = 80.0;
+    return true;
+  }
+  if (token == "primary_only" || token == "primary" || token == "hard" || token == "fast") {
+    options->blend_mode = orbvi_sdk::PanoramaBlendMode::PrimaryOnly;
+    options->seam_blend_px = 0;
+    options->photometric_align = false;
+    options->seam_ghost_suppression = false;
     return true;
   }
   return false;
@@ -281,6 +327,10 @@ class BridgeNode::Impl {
         return false;
       }
     }
+    if (config_.publish_panorama && !SubscribePanorama()) {
+      Stop();
+      return false;
+    }
 
     ROS_INFO_STREAM(
         "orbvi_ros_bridge started with Host SDK " << ORBVI_ROS_BRIDGE_HOST_SDK_LINKAGE
@@ -289,6 +339,10 @@ class BridgeNode::Impl {
   }
 
   void Stop() {
+    if (panorama_subscription_) {
+      panorama_subscription_->stop();
+      panorama_subscription_.reset();
+    }
     for (auto& handle : subscriptions_) {
       handle.stop();
     }
@@ -438,6 +492,7 @@ class BridgeNode::Impl {
     LoadImageMode(&config);
     LoadStreams(&config);
     LoadDepthOptions(&config);
+    LoadPanoramaOptions(&config);
     bool publish_depth_bool = false;
     if (private_node_.getParam("publish_depth", publish_depth_bool)) {
       config.publish_depth = publish_depth_bool;
@@ -493,6 +548,7 @@ class BridgeNode::Impl {
     private_node_.param<std::string>("streams", streams, streams);
     config->streams.clear();
     config->publish_depth = false;
+    config->publish_panorama = false;
     const auto requested = SplitCsv(streams);
     if (requested.size() == 1 && requested.front() == "all") {
       config->streams = DefaultConfig().streams;
@@ -505,6 +561,10 @@ class BridgeNode::Impl {
         config->publish_depth = true;
         continue;
       }
+      if (IsBridgePanoramaToken(token)) {
+        config->publish_panorama = true;
+        continue;
+      }
       orbvi_sdk::StreamId stream = orbvi_sdk::StreamId::Unknown;
       if (ParseBridgeStream(item, &stream) && stream != orbvi_sdk::StreamId::Unknown) {
         config->streams.push_back(stream);
@@ -512,10 +572,112 @@ class BridgeNode::Impl {
         ROS_WARN_STREAM("Ignoring unsupported stream name: " << item);
       }
     }
-    if (config->streams.empty()) {
+    if (config->streams.empty() && !config->publish_depth && !config->publish_panorama) {
       ROS_WARN("No valid streams configured; falling back to default bridge streams");
       config->streams = DefaultConfig().streams;
     }
+  }
+
+  void LoadPanoramaOptions(BridgeConfig* config) {
+    std::string pano_profile = "baseline";
+    private_node_.param<std::string>("pano_profile", pano_profile, pano_profile);
+    private_node_.param<std::string>("panorama_profile", pano_profile, pano_profile);
+    if (!ApplyPanoramaProfile(pano_profile, &config->panorama_options.stitch)) {
+      ROS_WARN_STREAM("Unsupported pano_profile '" << pano_profile << "'; using baseline");
+    }
+
+    int pano_width = static_cast<int>(config->panorama_options.stitch.width);
+    private_node_.param<int>("pano_width", pano_width, pano_width);
+    private_node_.param<int>("panorama_width", pano_width, pano_width);
+    config->panorama_options.stitch.width =
+        pano_width <= 0 ? 2048u : static_cast<std::uint32_t>(pano_width);
+
+    int pano_height = static_cast<int>(config->panorama_options.stitch.height);
+    private_node_.param<int>("pano_height", pano_height, pano_height);
+    private_node_.param<int>("panorama_height", pano_height, pano_height);
+    config->panorama_options.stitch.height =
+        pano_height <= 0 ? 1024u : static_cast<std::uint32_t>(pano_height);
+
+    private_node_.param<double>(
+        "pano_fov_half_deg",
+        config->panorama_options.stitch.fov_half_deg,
+        config->panorama_options.stitch.fov_half_deg);
+    private_node_.param<double>(
+        "panorama_fov_half_deg",
+        config->panorama_options.stitch.fov_half_deg,
+        config->panorama_options.stitch.fov_half_deg);
+
+    int seam_blend_px = static_cast<int>(config->panorama_options.stitch.seam_blend_px);
+    private_node_.param<int>("pano_seam_blend_px", seam_blend_px, seam_blend_px);
+    private_node_.param<int>("panorama_seam_blend_px", seam_blend_px, seam_blend_px);
+    config->panorama_options.stitch.seam_blend_px =
+        seam_blend_px < 0 ? 0u : static_cast<std::uint32_t>(seam_blend_px);
+
+    std::string seam_mode = orbvi_sdk::ToString(config->panorama_options.stitch.seam_mode);
+    private_node_.param<std::string>("pano_seam_mode", seam_mode, seam_mode);
+    private_node_.param<std::string>("panorama_seam_mode", seam_mode, seam_mode);
+    if (!ParsePanoramaSeamMode(seam_mode, &config->panorama_options.stitch.seam_mode)) {
+      ROS_WARN_STREAM("Unsupported pano_seam_mode '" << seam_mode << "'; using fixed");
+      config->panorama_options.stitch.seam_mode = orbvi_sdk::PanoramaSeamMode::Fixed;
+    }
+
+    int dp_seam_band_px = static_cast<int>(config->panorama_options.stitch.dp_seam_band_px);
+    private_node_.param<int>("pano_dp_seam_band_px", dp_seam_band_px, dp_seam_band_px);
+    private_node_.param<int>("panorama_dp_seam_band_px", dp_seam_band_px, dp_seam_band_px);
+    config->panorama_options.stitch.dp_seam_band_px =
+        dp_seam_band_px < 0 ? 0u : static_cast<std::uint32_t>(dp_seam_band_px);
+
+    private_node_.param<double>(
+        "pano_dp_seam_smoothness",
+        config->panorama_options.stitch.dp_seam_smoothness,
+        config->panorama_options.stitch.dp_seam_smoothness);
+    private_node_.param<double>(
+        "panorama_dp_seam_smoothness",
+        config->panorama_options.stitch.dp_seam_smoothness,
+        config->panorama_options.stitch.dp_seam_smoothness);
+
+    private_node_.param<double>(
+        "pano_seam_avoidance_penalty",
+        config->panorama_options.stitch.seam_avoidance_penalty,
+        config->panorama_options.stitch.seam_avoidance_penalty);
+    private_node_.param<double>(
+        "panorama_seam_avoidance_penalty",
+        config->panorama_options.stitch.seam_avoidance_penalty,
+        config->panorama_options.stitch.seam_avoidance_penalty);
+
+    std::string blend_mode = "feather";
+    private_node_.param<std::string>("pano_blend", blend_mode, blend_mode);
+    private_node_.param<std::string>("panorama_blend", blend_mode, blend_mode);
+    if (!ParsePanoramaBlendMode(blend_mode, &config->panorama_options.stitch.blend_mode)) {
+      ROS_WARN_STREAM("Unsupported pano_blend '" << blend_mode << "'; using feather");
+      config->panorama_options.stitch.blend_mode = orbvi_sdk::PanoramaBlendMode::Feather;
+    }
+
+    private_node_.param<bool>(
+        "pano_photometric_align",
+        config->panorama_options.stitch.photometric_align,
+        config->panorama_options.stitch.photometric_align);
+    private_node_.param<bool>(
+        "panorama_photometric_align",
+        config->panorama_options.stitch.photometric_align,
+        config->panorama_options.stitch.photometric_align);
+
+    private_node_.param<bool>(
+        "pano_seam_ghost_suppression",
+        config->panorama_options.stitch.seam_ghost_suppression,
+        config->panorama_options.stitch.seam_ghost_suppression);
+    private_node_.param<bool>(
+        "panorama_seam_ghost_suppression",
+        config->panorama_options.stitch.seam_ghost_suppression,
+        config->panorama_options.stitch.seam_ghost_suppression);
+    private_node_.param<double>(
+        "pano_seam_ghost_threshold",
+        config->panorama_options.stitch.seam_ghost_threshold,
+        config->panorama_options.stitch.seam_ghost_threshold);
+    private_node_.param<double>(
+        "panorama_seam_ghost_threshold",
+        config->panorama_options.stitch.seam_ghost_threshold,
+        config->panorama_options.stitch.seam_ghost_threshold);
   }
 
   void LoadDepthOptions(BridgeConfig* config) {
@@ -667,6 +829,40 @@ class BridgeNode::Impl {
     }
     subscriptions_.push_back(std::move(result.value()));
     ROS_INFO_STREAM("Subscribed Host SDK stream " << orbvi_sdk::ToString(stream));
+    return true;
+  }
+
+  bool SubscribePanorama() {
+    orbvi_sdk::PanoramaSubscribeOptions options = config_.panorama_options;
+    options.max_receive_queue_depth = config_.max_receive_queue_depth;
+    options.first_frame_timeout_ms = config_.first_frame_timeout_ms;
+    options.require_streaming_transport = config_.require_streaming_transport;
+    options.allow_sample_endpoint_fallback = config_.allow_sample_endpoint_fallback;
+    options.include_source_frame = false;
+
+    auto result = client_->subscribePanorama(
+        options,
+        [this](const orbvi_sdk::PanoramaFrameDelivery& delivery) {
+          PublishPanorama(delivery);
+        });
+    if (!result) {
+      ROS_ERROR_STREAM(
+          "ORBVI Host SDK panorama subscribe failed: " << result.error().message);
+      return false;
+    }
+    panorama_subscription_ = std::move(result.value());
+    ROS_INFO_STREAM(
+        "Subscribed Host SDK derived panorama from raw_fisheye_stream, size="
+        << options.stitch.width << "x" << options.stitch.height
+        << ", blend=" << orbvi_sdk::ToString(options.stitch.blend_mode)
+        << ", seam_mode=" << orbvi_sdk::ToString(options.stitch.seam_mode)
+        << ", dp_seam_band_px=" << options.stitch.dp_seam_band_px
+        << ", dp_seam_smoothness=" << options.stitch.dp_seam_smoothness
+        << ", photometric_align="
+        << (options.stitch.photometric_align ? "true" : "false")
+        << ", seam_ghost_suppression="
+        << (options.stitch.seam_ghost_suppression ? "true" : "false")
+        << ", seam_ghost_threshold=" << options.stitch.seam_ghost_threshold);
     return true;
   }
 
@@ -863,6 +1059,15 @@ class BridgeNode::Impl {
     }
   }
 
+  void PublishPanorama(const orbvi_sdk::PanoramaFrameDelivery& delivery) {
+    sensor_msgs::msg::Image message;
+    if (!MakePanoramaImageMessage(delivery.panorama.view(), &message)) {
+      ROS_WARN_THROTTLE(5.0, "Failed to convert Host SDK panorama to ROS Image");
+      return;
+    }
+    PublishMessage(JoinTopic(config_.topic_prefix, "pano/image"), std::move(message));
+  }
+
   void PublishImu(const orbvi_sdk::FrameView& frame) {
     sensor_msgs::msg::Imu message;
     if (!MakeImuMessage(frame, &message)) {
@@ -972,6 +1177,7 @@ class BridgeNode::Impl {
   BridgeConfig config_;
   std::unique_ptr<orbvi_sdk::Client> client_;
   std::optional<orbvi_sdk::DepthCalibration> depth_calibration_;
+  std::optional<orbvi_sdk::PanoramaSubscriptionHandle> panorama_subscription_;
   std::vector<orbvi_sdk::SubscriptionHandle> subscriptions_;
   std::mutex publish_queue_mutex_;
   std::condition_variable publish_queue_cv_;

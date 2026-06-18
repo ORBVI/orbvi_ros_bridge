@@ -4,7 +4,8 @@
 
 ORBVI ROS Bridge publishes ORBVI device data into ROS1 or ROS2 through the
 ORBVI Host SDK. It is intended for application developers who need camera, IMU,
-MID360 LiDAR, disparity, depth and VIO topics on Linux hosts.
+MID360 LiDAR, disparity, Host-derived depth, Host-derived panorama and VIO
+topics on Linux hosts.
 
 The repository includes:
 
@@ -34,6 +35,7 @@ ROS1 and ROS2 use the same topic names. ROS2 message packages use the matching
 | `/orbvi/raw/camera_<id>/image/compressed` | `sensor_msgs/CompressedImage` | Raw fisheye compressed image transport |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | Decoded rectified image when enabled |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | Rectified stereo pair compressed image transport |
+| `/orbvi/pano/image` | `sensor_msgs/Image` | Host SDK panorama stitched from `raw_fisheye_stream` when `pano` is enabled |
 | `/orbvi/imu` | `sensor_msgs/Imu` | Device IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 point cloud stream |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU stream |
@@ -116,11 +118,25 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
   host:=<device-ip>
 ```
 
+Optional Host-derived panorama:
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
+```
+
 ROS2 all streams:
 
 ```bash
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
   host:=<device-ip>
+```
+
+Optional Host-derived panorama:
+
+```bash
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
 ```
 
 ## Scenario Quickstart
@@ -243,6 +259,19 @@ Common parameters:
 | `connect_timeout_ms` | `2000` | Initial Host SDK connect timeout per attempt |
 | `connect_retry_count` | `4` | Initial Host SDK connect retries after the first failed attempt |
 | `connect_retry_delay_ms` | `1000` | Delay between initial Host SDK connect attempts |
+| `pano_profile` | `baseline` | Panorama test profile: `baseline`, `ghost_suppression`/`balanced`, or `primary_only` |
+| `pano_width` | `2048` | Host SDK panorama output width when `streams` includes `pano` |
+| `pano_height` | `1024` | Host SDK panorama output height when `streams` includes `pano` |
+| `pano_fov_half_deg` | `95.0` | Half horizontal field of view used by Host SDK panorama stitching |
+| `pano_seam_blend_px` | `32` | Seam blending width for Host SDK panorama stitching |
+| `pano_seam_mode` | `fixed` | Host SDK panorama seam mode: `fixed` or `dynamic`/`dynamic_programming`/`dp` |
+| `pano_dp_seam_band_px` | `96` | Dynamic-programming seam search band width in pixels |
+| `pano_dp_seam_smoothness` | `8.0` | Smoothness penalty used by dynamic-programming seam search |
+| `pano_seam_avoidance_penalty` | `220.0` | Penalty for seam-avoidance masks when dynamic seam selection is enabled |
+| `pano_blend` | `feather` | Host SDK panorama blend mode: `feather` or `primary_only` |
+| `pano_photometric_align` | `true` | Enable Host SDK per-frame photometric alignment |
+| `pano_seam_ghost_suppression` | `false` | Enable seam-local ghost suppression during Host SDK feather blending |
+| `pano_seam_ghost_threshold` | `80.0` | Color/luma difference threshold used by seam ghost suppression |
 | `use_fastdds_shm` | `true` | Enable the bundled Fast DDS SHM profile for the ROS2 bridge process |
 | `fastdds_shm_profile` | Bundled XML | Fast DDS SHM profile path for ROS2, override when using a custom profile |
 

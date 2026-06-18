@@ -36,6 +36,7 @@ std::string NormalizeTopicPrefix(std::string prefix);
 std::string JoinTopic(const std::string& prefix, std::string suffix);
 bool ParseBridgeStream(const std::string& input, orbvi_sdk::StreamId* out);
 bool IsBridgeImageStream(orbvi_sdk::StreamId stream);
+bool IsBridgePanoramaToken(const std::string& input);
 
 std::vector<CompressedImageOutput> MakeCompressedImageMessages(
     const orbvi_sdk::FrameView& frame,
@@ -45,6 +46,9 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
 std::vector<ImageOutput> MakeDecodedImageMessages(
     orbvi_sdk::StreamId stream,
     const orbvi_sdk::FrameDelivery& delivery);
+bool MakePanoramaImageMessage(
+    const orbvi_sdk::PanoramaImageView& panorama,
+    sensor_msgs::Image* out);
 
 bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::Image* out);
 bool MakeDepthImage(const orbvi_sdk::DepthMapView& depth, sensor_msgs::Image* out);

@@ -30,6 +30,7 @@ enum class FrameFormat : std::uint16_t {
   Disparity32F = 6,
   Disparity16UQ8 = 7,
   VioPose = 8,
+  PanoDisplayJpeg = 9,
   Reserved = 65535,
 };
 

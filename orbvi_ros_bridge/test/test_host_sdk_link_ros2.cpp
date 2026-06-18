@@ -7,6 +7,7 @@
 
 #include "frame_conversions_ros2.hpp"
 #include "orbvi_sdk/client.hpp"
+#include "panorama_options.hpp"
 
 namespace {
 
@@ -34,6 +35,50 @@ TEST(OrbviRosBridgeHostSdkLink, PublicStreamParsingIsHostSdkApi) {
   EXPECT_TRUE(orbvi_sdk::ParseStreamId("raw_fisheye_stream", &stream));
   EXPECT_EQ(stream, orbvi_sdk::StreamId::RawFisheye);
   EXPECT_STREQ(orbvi_sdk::ToString(stream), "raw_fisheye_stream");
+  EXPECT_TRUE(orbvi_ros_bridge::IsBridgePanoramaToken("pano"));
+  EXPECT_TRUE(orbvi_ros_bridge::IsBridgePanoramaToken("pano_display_stream"));
+  EXPECT_FALSE(orbvi_ros_bridge::ParseBridgeStream("pano", &stream));
+}
+
+TEST(OrbviRosBridgePanoramaImages, HostSdkPanoramaRoutesToImageTopic) {
+  orbvi_sdk::OwnedPanoramaImage panorama;
+  panorama.width = 2;
+  panorama.height = 1;
+  panorama.stride = 6;
+  panorama.timestamp_ns = 123456789;
+  panorama.frame_id = "orbvi/panorama/equirectangular";
+  panorama.data = {1, 2, 3, 4, 5, 6};
+
+  sensor_msgs::msg::Image message;
+  ASSERT_TRUE(orbvi_ros_bridge::MakePanoramaImageMessage(panorama.view(), &message));
+  EXPECT_EQ(message.header.frame_id, "orbvi/panorama/equirectangular");
+  EXPECT_EQ(message.width, 2u);
+  EXPECT_EQ(message.height, 1u);
+  EXPECT_EQ(message.encoding, "bgr8");
+  EXPECT_EQ(message.step, 6u);
+  EXPECT_EQ(message.data.size(), panorama.data.size());
+}
+
+TEST(OrbviRosBridgePanoramaOptions, ParsesDynamicSeamModeTokens) {
+  orbvi_sdk::PanoramaSeamMode mode = orbvi_sdk::PanoramaSeamMode::Fixed;
+
+  EXPECT_TRUE(orbvi_ros_bridge::ParsePanoramaSeamMode("dynamic", &mode));
+  EXPECT_EQ(mode, orbvi_sdk::PanoramaSeamMode::DynamicProgramming);
+
+  mode = orbvi_sdk::PanoramaSeamMode::Fixed;
+  EXPECT_TRUE(orbvi_ros_bridge::ParsePanoramaSeamMode("dynamic-programming", &mode));
+  EXPECT_EQ(mode, orbvi_sdk::PanoramaSeamMode::DynamicProgramming);
+
+  mode = orbvi_sdk::PanoramaSeamMode::Fixed;
+  EXPECT_TRUE(orbvi_ros_bridge::ParsePanoramaSeamMode("dp", &mode));
+  EXPECT_EQ(mode, orbvi_sdk::PanoramaSeamMode::DynamicProgramming);
+}
+
+TEST(OrbviRosBridgePanoramaOptions, RejectsUnknownSeamModeTokens) {
+  orbvi_sdk::PanoramaSeamMode mode = orbvi_sdk::PanoramaSeamMode::Fixed;
+
+  EXPECT_FALSE(orbvi_ros_bridge::ParsePanoramaSeamMode("unknown", &mode));
+  EXPECT_EQ(mode, orbvi_sdk::PanoramaSeamMode::Fixed);
 }
 
 TEST(OrbviRosBridgeDecodedImages, RectifiedPublicFrameIdRoutesToDirectionTopic) {

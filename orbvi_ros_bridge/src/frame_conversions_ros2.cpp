@@ -663,6 +663,14 @@ bool IsBridgeImageStream(orbvi_sdk::StreamId stream) {
          stream == orbvi_sdk::StreamId::RectifiedFisheye;
 }
 
+bool IsBridgePanoramaToken(const std::string& input) {
+  std::string name = LowerCopy(Trim(input));
+  std::replace(name.begin(), name.end(), '-', '_');
+  return name == "pano" || name == "panorama" ||
+         name == "pano_display" || name == "pano_display_stream" ||
+         name == "panorama_stream";
+}
+
 bool ParseBridgeStream(const std::string& input, orbvi_sdk::StreamId* out) {
   if (out == nullptr) {
     return false;
@@ -683,6 +691,9 @@ bool ParseBridgeStream(const std::string& input, orbvi_sdk::StreamId* out) {
     name = "disparity_stream";
   } else if (name == "vio") {
     name = "vio_pose_stream";
+  } else if (IsBridgePanoramaToken(name)) {
+    *out = orbvi_sdk::StreamId::Unknown;
+    return false;
   }
   return orbvi_sdk::ParseStreamId(name, out);
 }
@@ -832,6 +843,26 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
     append(delivery.decoded_image->view(), 0);
   }
   return outputs;
+}
+
+bool MakePanoramaImageMessage(
+    const orbvi_sdk::PanoramaImageView& panorama,
+    sensor_msgs::msg::Image* out) {
+  if (out == nullptr || panorama.data == nullptr ||
+      panorama.data_size == 0 || panorama.width == 0 ||
+      panorama.height == 0 || panorama.stride == 0) {
+    return false;
+  }
+  out->header = MakeHeader(
+      panorama.timestamp_ns,
+      panorama.frame_id.empty() ? "orbvi/panorama/equirectangular" : panorama.frame_id);
+  out->height = panorama.height;
+  out->width = panorama.width;
+  out->encoding = "bgr8";
+  out->is_bigendian = 0;
+  out->step = panorama.stride;
+  out->data.assign(panorama.data, panorama.data + panorama.data_size);
+  return true;
 }
 
 bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Image* out) {

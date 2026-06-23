@@ -81,6 +81,21 @@ TEST(OrbviRosBridgePanoramaOptions, RejectsUnknownSeamModeTokens) {
   EXPECT_EQ(mode, orbvi_sdk::PanoramaSeamMode::Fixed);
 }
 
+TEST(OrbviRosBridgePanoramaOptions, ParsesMode2BlendTokens) {
+  orbvi_sdk::PanoramaBlendMode mode = orbvi_sdk::PanoramaBlendMode::Feather;
+
+  EXPECT_TRUE(orbvi_ros_bridge::ParsePanoramaBlendMode("multiband", &mode));
+  EXPECT_EQ(mode, orbvi_sdk::PanoramaBlendMode::MultiBand);
+
+  mode = orbvi_sdk::PanoramaBlendMode::Feather;
+  EXPECT_TRUE(orbvi_ros_bridge::ParsePanoramaBlendMode("mode2", &mode));
+  EXPECT_EQ(mode, orbvi_sdk::PanoramaBlendMode::MultiBand);
+
+  mode = orbvi_sdk::PanoramaBlendMode::Feather;
+  EXPECT_TRUE(orbvi_ros_bridge::ParsePanoramaBlendMode("2", &mode));
+  EXPECT_EQ(mode, orbvi_sdk::PanoramaBlendMode::MultiBand);
+}
+
 TEST(OrbviRosBridgeDecodedImages, RectifiedPublicFrameIdRoutesToDirectionTopic) {
   orbvi_sdk::OwnedDecodedImage decoded;
   decoded.width = 1;

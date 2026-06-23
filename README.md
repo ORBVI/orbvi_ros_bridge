@@ -125,6 +125,9 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
   host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
 ```
 
+The default panorama config is `config/pano_mode2.yaml`, which uses Host SDK
+blend mode 2 (`pano_blend=multiband`) and `pano_seam_blend_px=32`.
+
 ROS2 all streams:
 
 ```bash
@@ -137,6 +140,47 @@ Optional Host-derived panorama:
 ```bash
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
   host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
+```
+
+The default ROS2 panorama config is `config/pano_mode2_ros2.yaml`, with the same
+mode 2 blend and 32 px seam blend settings.
+
+## Panorama Config
+
+`pano` is a Host SDK-derived panorama stitched from `raw_fisheye_stream`.
+The bridge does not require the device to publish a board-generated
+`pano_display_stream`.
+
+The launch files load a default panorama config:
+
+| ROS | Config file | Format |
+| --- | --- | --- |
+| ROS1 | `config/pano_mode2.yaml` | Flat ROS parameter YAML |
+| ROS2 | `config/pano_mode2_ros2.yaml` | ROS2 node parameter YAML |
+
+Both configs use the current reference defaults:
+
+```yaml
+pano_blend: "multiband"
+pano_seam_blend_px: 32
+pano_width: 2048
+pano_height: 1024
+pano_seam_mode: "fixed"
+pano_photometric_align: true
+```
+
+Override the launch-time config with `pano_config`:
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> \
+  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
+  pano_config:=/path/to/pano_mode2.yaml
+
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> \
+  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
+  pano_config:=/path/to/pano_mode2_ros2.yaml
 ```
 
 ## Scenario Quickstart
@@ -259,6 +303,7 @@ Common parameters:
 | `connect_timeout_ms` | `2000` | Initial Host SDK connect timeout per attempt |
 | `connect_retry_count` | `4` | Initial Host SDK connect retries after the first failed attempt |
 | `connect_retry_delay_ms` | `1000` | Delay between initial Host SDK connect attempts |
+| `pano_config` | Bundled YAML | Launch-time panorama config file. Defaults to mode 2 / 32 px blend settings |
 | `pano_profile` | `baseline` | Panorama test profile: `baseline`, `ghost_suppression`/`balanced`, or `primary_only` |
 | `pano_width` | `2048` | Host SDK panorama output width when `streams` includes `pano` |
 | `pano_height` | `1024` | Host SDK panorama output height when `streams` includes `pano` |
@@ -268,9 +313,9 @@ Common parameters:
 | `pano_dp_seam_band_px` | `96` | Dynamic-programming seam search band width in pixels |
 | `pano_dp_seam_smoothness` | `8.0` | Smoothness penalty used by dynamic-programming seam search |
 | `pano_seam_avoidance_penalty` | `220.0` | Penalty for seam-avoidance masks when dynamic seam selection is enabled |
-| `pano_blend` | `feather` | Host SDK panorama blend mode: `feather` or `primary_only` |
+| `pano_blend` | `multiband` | Host SDK panorama blend mode: `multiband`/`mode2`, `feather`, or `primary_only` |
 | `pano_photometric_align` | `true` | Enable Host SDK per-frame photometric alignment |
-| `pano_seam_ghost_suppression` | `false` | Enable seam-local ghost suppression during Host SDK feather blending |
+| `pano_seam_ghost_suppression` | `false` | Enable seam-local ghost suppression during Host SDK panorama stitching |
 | `pano_seam_ghost_threshold` | `80.0` | Color/luma difference threshold used by seam ghost suppression |
 | `use_fastdds_shm` | `true` | Enable the bundled Fast DDS SHM profile for the ROS2 bridge process |
 | `fastdds_shm_profile` | Bundled XML | Fast DDS SHM profile path for ROS2, override when using a custom profile |

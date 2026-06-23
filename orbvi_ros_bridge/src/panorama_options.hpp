@@ -42,4 +42,27 @@ inline bool ParsePanoramaSeamMode(
   return false;
 }
 
+inline bool ParsePanoramaBlendMode(
+    const std::string& value,
+    orbvi_sdk::PanoramaBlendMode* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  const std::string token = NormalizePanoramaOptionToken(value);
+  if (token == "feather") {
+    *out = orbvi_sdk::PanoramaBlendMode::Feather;
+    return true;
+  }
+  if (token == "primary" || token == "primary_only" || token == "none") {
+    *out = orbvi_sdk::PanoramaBlendMode::PrimaryOnly;
+    return true;
+  }
+  if (token == "multiband" || token == "multi_band" || token == "mode2" ||
+      token == "mode_2" || token == "2") {
+    *out = orbvi_sdk::PanoramaBlendMode::MultiBand;
+    return true;
+  }
+  return false;
+}
+
 }  // namespace orbvi_ros_bridge

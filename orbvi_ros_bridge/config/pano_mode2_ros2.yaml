@@ -1,0 +1,17 @@
+# Host SDK panorama reference config used by ROS2 launch files.
+# These parameters are used only when streams includes pano.
+/**:
+  ros__parameters:
+    pano_profile: "baseline"
+    pano_width: 2048
+    pano_height: 1024
+    pano_fov_half_deg: 95.0
+    pano_seam_blend_px: 32
+    pano_seam_mode: "fixed"
+    pano_dp_seam_band_px: 96
+    pano_dp_seam_smoothness: 8.0
+    pano_seam_avoidance_penalty: 220.0
+    pano_blend: "multiband"
+    pano_photometric_align: true
+    pano_seam_ghost_suppression: false
+    pano_seam_ghost_threshold: 80.0

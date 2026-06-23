@@ -178,22 +178,6 @@ bool ParsePointCloudFrame(const std::string& value, orbvi_sdk::PointCloudFrame* 
   return false;
 }
 
-bool ParsePanoramaBlendMode(const std::string& value, orbvi_sdk::PanoramaBlendMode* out) {
-  if (out == nullptr) {
-    return false;
-  }
-  const std::string token = NormalizeToken(value);
-  if (token == "feather") {
-    *out = orbvi_sdk::PanoramaBlendMode::Feather;
-    return true;
-  }
-  if (token == "primary" || token == "primary_only" || token == "none") {
-    *out = orbvi_sdk::PanoramaBlendMode::PrimaryOnly;
-    return true;
-  }
-  return false;
-}
-
 bool ApplyPanoramaProfile(const std::string& value, orbvi_sdk::PanoramaStitchOptions* options) {
   if (options == nullptr) {
     return false;
@@ -203,7 +187,7 @@ bool ApplyPanoramaProfile(const std::string& value, orbvi_sdk::PanoramaStitchOpt
     return true;
   }
   if (token == "ghost_suppression" || token == "ghost" || token == "balanced") {
-    options->blend_mode = orbvi_sdk::PanoramaBlendMode::Feather;
+    options->blend_mode = orbvi_sdk::PanoramaBlendMode::MultiBand;
     options->seam_blend_px = 32;
     options->photometric_align = true;
     options->seam_mode = orbvi_sdk::PanoramaSeamMode::DynamicProgramming;
@@ -645,12 +629,12 @@ class BridgeNode::Impl {
         config->panorama_options.stitch.seam_avoidance_penalty,
         config->panorama_options.stitch.seam_avoidance_penalty);
 
-    std::string blend_mode = "feather";
+    std::string blend_mode = "multiband";
     private_node_.param<std::string>("pano_blend", blend_mode, blend_mode);
     private_node_.param<std::string>("panorama_blend", blend_mode, blend_mode);
     if (!ParsePanoramaBlendMode(blend_mode, &config->panorama_options.stitch.blend_mode)) {
-      ROS_WARN_STREAM("Unsupported pano_blend '" << blend_mode << "'; using feather");
-      config->panorama_options.stitch.blend_mode = orbvi_sdk::PanoramaBlendMode::Feather;
+      ROS_WARN_STREAM("Unsupported pano_blend '" << blend_mode << "'; using multiband");
+      config->panorama_options.stitch.blend_mode = orbvi_sdk::PanoramaBlendMode::MultiBand;
     }
 
     private_node_.param<bool>(

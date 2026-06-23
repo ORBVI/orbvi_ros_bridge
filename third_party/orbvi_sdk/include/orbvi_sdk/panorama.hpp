@@ -18,6 +18,7 @@ struct CalibrationStatus;
 enum class PanoramaBlendMode {
   PrimaryOnly,
   Feather,
+  MultiBand,
 };
 
 enum class PanoramaSeamMode {

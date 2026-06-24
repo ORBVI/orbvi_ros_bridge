@@ -10,11 +10,16 @@ ARGUMENT_DEFAULTS = {
 }
 
 DEFAULT_BRIDGE_PARAMETERS = {
-    "streams": "raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio",
+    "streams": "raw,rectified,pano,imu,disparity,depth,vio",
 }
 
 
 def generate_launch_description():
+    pano_config = PathJoinSubstitution([
+        FindPackageShare("orbvi_ros_bridge"),
+        "config",
+        "pano_mode2_ros2.yaml",
+    ])
     fastdds_shm_profile = PathJoinSubstitution([
         FindPackageShare("orbvi_ros_bridge"),
         "config",
@@ -33,6 +38,6 @@ def generate_launch_description():
             executable="orbvi_ros_bridge_node",
             name="orbvi_ros_bridge",
             output="screen",
-            parameters=[parameters],
+            parameters=[pano_config, parameters],
         ),
     ])

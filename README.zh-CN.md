@@ -9,7 +9,7 @@ Host 侧全景和 VIO topic 的应用开发者。
 仓库包含：
 
 - ROS1 Noetic 和 ROS2 Foxy/Jazzy bridge 节点
-- 全数据、视觉、视觉 + MID360 三类 launch 文件
+- 视觉、MID360、全景三类 launch 文件
 - bridge 所需的最小 `livox_ros_driver2` CustomMsg 定义
 - MID360 和全 topic 频率检查工具
 
@@ -109,102 +109,34 @@ source install/setup.bash
 
 ## 启动 Bridge
 
-ROS1 全流：
+根据需要选择一个 launch 文件。对外启动参数只需要 `host`。
+
+视觉数据、深度和 VIO：
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip>
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
 
-可选 Host 侧全景：
+视觉数据、深度、VIO 和 MID360：
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
 ```
 
-默认全景配置为 `config/pano_mode2.yaml`，使用 Host SDK blend mode 2
-（`pano_blend=multiband`）和 `pano_seam_blend_px=32`。
-
-ROS2 全流：
+视觉数据、深度、VIO 和 Host 侧全景：
 
 ```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip>
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_pano.launch host:=<device-ip>
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 ```
 
-可选 Host 侧全景：
+公开 topic 固定在 `/orbvi` 下。全景入口使用内置 `config/pano_mode2.yaml` /
+`config/pano_mode2_ros2.yaml` 默认配置。
 
-```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
-```
-
-ROS2 默认全景配置为 `config/pano_mode2_ros2.yaml`，同样使用 mode 2
-和 32 px 接缝融合配置。
-
-## 全景配置
-
-`pano` 是 Host SDK 基于 `raw_fisheye_stream` 拼接出的全景图。
-bridge 不依赖设备端输出 `pano_display_stream`。
-
-Launch 文件默认加载内置全景配置：
-
-| ROS | 配置文件 | 格式 |
-| --- | --- | --- |
-| ROS1 | `config/pano_mode2.yaml` | 扁平 ROS 参数 YAML |
-| ROS2 | `config/pano_mode2_ros2.yaml` | ROS2 节点参数 YAML |
-
-两个配置都使用当前参考默认值：
-
-```yaml
-pano_blend: "multiband"
-pano_seam_blend_px: 32
-pano_width: 2048
-pano_height: 1024
-pano_seam_mode: "fixed"
-pano_photometric_align: true
-```
-
-需要替换配置时传 `pano_config`：
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> \
-  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
-  pano_config:=/path/to/pano_mode2.yaml
-
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip> \
-  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
-  pano_config:=/path/to/pano_mode2_ros2.yaml
-```
-
-## 场景速查
-
-根据运行需求选择对应 launch。公开 topic 固定在 `/orbvi` 下。
-
-| 场景 | ROS1 命令 | ROS2 命令 | 首要检查 |
-| --- | --- | --- | --- |
-| 基础全数据 bridge | `roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom` |
-| 相机、深度和 VIO | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge_visual.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
-| 相机、深度、VIO 和 MID360 | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
-
-只需要视觉原始数据、深度和 VIO 时使用 `orbvi_ros_bridge_visual.launch`。
-需要视觉能力和 MID360 点云、MID360 IMU 同时运行时使用
-`orbvi_ros_bridge_mid360.launch`。
-
-
-ROS2 launch 默认会在 bridge 主机上启用 Fast DDS 共享内存：
-
-```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip>
-```
-
-launch 默认会为 bridge 进程设置 Fast DDS SHM 环境。
-但单独启动的 `ros2 topic`、rqt、rviz 或其它消费进程也必须带相同环境，才能加入同一个
-本机 SHM transport：
+ROS2 launch 会为 bridge 进程设置内置 Fast DDS 共享内存 profile。单独启动的
+`ros2 topic`、rqt、rviz 或其它消费进程如需消费本机大流量 topic，使用相同环境：
 
 ```bash
 SHM_PROFILE="$(ros2 pkg prefix orbvi_ros_bridge)/share/orbvi_ros_bridge/config/fastdds_shm.xml"
@@ -217,7 +149,7 @@ ros2 daemon stop
 
 ## 视觉和 MID360 数据检查
 
-启动视觉 + MID360：
+启动 MID360 入口：
 
 ROS1:
 
@@ -279,42 +211,17 @@ scripts/orbvi_ros_bridge_rate_check.sh \
 
 ## Launch 文件
 
-Launch 文件按 ROS 版本和运行场景分组。
+对外接口固定为三套 launch 配置。每个 launch 只接收 `host`；stream 组合和参考配置保留在 launch 文件内部。
 
-| Launch 文件 | ROS | 用途 |
-| --- | --- | --- |
-| `orbvi_ros_bridge.launch` | ROS1 | 默认全原始数据入口：视觉数据、深度、VIO 和 MID360 |
-| `orbvi_ros_bridge_visual.launch` | ROS1 | 视觉入口：四路 raw decoded 图、rectified 图、设备 IMU、视差、深度和 VIO |
-| `orbvi_ros_bridge_mid360.launch` | ROS1 | 视觉入口 + MID360 点云和 MID360 IMU |
-| `orbvi_ros_bridge.launch.py` | ROS2 | 默认全原始数据入口：视觉数据、深度、VIO 和 MID360 |
-| `orbvi_ros_bridge_visual.launch.py` | ROS2 | 视觉入口：四路 raw decoded 图、rectified 图、设备 IMU、视差、深度和 VIO |
-| `orbvi_ros_bridge_mid360.launch.py` | ROS2 | 视觉入口 + MID360 点云和 MID360 IMU |
-
-常用参数：
+| 能力 | ROS1 launch | ROS2 launch | 首要检查 topic |
+| --- | --- | --- | --- |
+| 视觉、深度和 VIO | `orbvi_ros_bridge.launch` | `orbvi_ros_bridge.launch.py` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
+| 视觉、深度、VIO 和 MID360 | `orbvi_ros_bridge_mid360.launch` | `orbvi_ros_bridge_mid360.launch.py` | `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
+| 视觉、深度、VIO 和全景 | `orbvi_ros_bridge_pano.launch` | `orbvi_ros_bridge_pano.launch.py` | `/orbvi/pano/image` |
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI 设备 IP 或 hostname |
-| `control_port` | `18088` | ORBVI SDK 控制端口 |
-| `connect_timeout_ms` | `2000` | 首次 Host SDK 连接每次尝试的超时时间 |
-| `connect_retry_count` | `4` | 首次连接失败后的重试次数 |
-| `connect_retry_delay_ms` | `1000` | Host SDK 连接重试间隔 |
-| `pano_config` | 内置 YAML | launch 级全景配置文件，默认使用 mode 2 / 32 px 融合配置 |
-| `pano_profile` | `baseline` | 全景测试档位：`baseline`、`ghost_suppression`/`balanced` 或 `primary_only` |
-| `pano_width` | `2048` | `streams` 包含 `pano` 时 Host SDK 全景输出宽度 |
-| `pano_height` | `1024` | `streams` 包含 `pano` 时 Host SDK 全景输出高度 |
-| `pano_fov_half_deg` | `95.0` | Host SDK 全景拼接使用的水平半视场角 |
-| `pano_seam_blend_px` | `32` | Host SDK 全景拼接接缝融合宽度 |
-| `pano_seam_mode` | `fixed` | Host SDK 全景接缝模式：`fixed` 或 `dynamic`/`dynamic_programming`/`dp` |
-| `pano_dp_seam_band_px` | `96` | 动态规划接缝搜索带宽，单位像素 |
-| `pano_dp_seam_smoothness` | `8.0` | 动态规划接缝搜索使用的平滑惩罚 |
-| `pano_seam_avoidance_penalty` | `220.0` | 启用动态接缝选择时，接缝避让 mask 使用的惩罚值 |
-| `pano_blend` | `multiband` | Host SDK 全景融合模式：`multiband`/`mode2`、`feather` 或 `primary_only` |
-| `pano_photometric_align` | `true` | 是否启用 Host SDK 全景逐帧曝光对齐 |
-| `pano_seam_ghost_suppression` | `false` | 是否启用 Host SDK 接缝局部重影抑制 |
-| `pano_seam_ghost_threshold` | `80.0` | 接缝重影抑制使用的颜色/亮度差异阈值 |
-| `use_fastdds_shm` | `true` | ROS2 bridge 进程是否启用内置 Fast DDS SHM profile |
-| `fastdds_shm_profile` | 内置 XML | ROS2 Fast DDS SHM profile 路径，可用自定义 profile 覆盖 |
 
 Topic 名称固定在 `/orbvi` 下。
 
@@ -377,7 +284,7 @@ rostopic hz /orbvi/lidar/custom --window 30
 深度输出依赖 Host SDK 的视差帧和有效标定：
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch \
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
   host:=<device-ip>
 ```
 

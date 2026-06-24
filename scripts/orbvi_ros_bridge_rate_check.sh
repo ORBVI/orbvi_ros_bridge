@@ -45,9 +45,9 @@ Options:
   --start-bridge               Start a temporary orbvi_ros_bridge before checking.
   --keep-bridge                Do not stop the temporary bridge on exit.
   --device-host HOST           Device host used only to launch the bridge.
-  --control-port PORT          Device control port for bridge launch (default: 18088).
-  --streams CSV                Bridge streams when launched (default: raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio).
-  --image-mode MODE            Bridge image mode when launched (default: raw-only).
+  --bridge-launch LAUNCH       Launch file for --start-bridge (default: orbvi_ros_bridge_mid360.launch).
+                               Use orbvi_ros_bridge.launch for visual topics or
+                               orbvi_ros_bridge_pano.launch for panorama topics.
   --bridge-wait-sec SECONDS    Wait after starting bridge (default: 10).
   -h, --help                   Show this help.
 USAGE
@@ -65,9 +65,7 @@ output_dir=""
 start_bridge=0
 keep_bridge=0
 device_host=""
-control_port=18088
-streams="raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio"
-image_mode="raw-only"
+bridge_launch="orbvi_ros_bridge_mid360.launch"
 bridge_wait_sec=10
 
 while [[ $# -gt 0 ]]; do
@@ -84,9 +82,7 @@ while [[ $# -gt 0 ]]; do
     --start-bridge) start_bridge=1; shift ;;
     --keep-bridge) keep_bridge=1; shift ;;
     --device-host) device_host="${2:-}"; shift 2 ;;
-    --control-port) control_port="${2:-}"; shift 2 ;;
-    --streams) streams="${2:-}"; shift 2 ;;
-    --image-mode) image_mode="${2:-}"; shift 2 ;;
+    --bridge-launch) bridge_launch="${2:-}"; shift 2 ;;
     --bridge-wait-sec) bridge_wait_sec="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -100,9 +96,7 @@ run_remote() {
     --topic-prefix "$topic_prefix"
     --sample-sec "$sample_sec"
     --window "$window_size"
-    --control-port "$control_port"
-    --streams "$streams"
-    --image-mode "$image_mode"
+    --bridge-launch "$bridge_launch"
     --bridge-wait-sec "$bridge_wait_sec"
   )
   [[ -n "$bridge_setup" ]] && args+=(--bridge-setup "$bridge_setup")
@@ -193,16 +187,10 @@ start_temp_bridge() {
     exit 2
   fi
 
-  log "starting temporary orbvi_ros_bridge host=${device_host} port=${control_port} streams=${streams}"
+  log "starting temporary orbvi_ros_bridge launch=${bridge_launch} host=${device_host}"
   pkill -x orbvi_ros_bridge_node >/dev/null 2>&1 || true
-  roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  roslaunch orbvi_ros_bridge "$bridge_launch" \
     host:="$device_host" \
-    control_port:="$control_port" \
-    streams:="$streams" \
-    image_mode:="$image_mode" \
-    queue_size:=2 \
-    max_receive_queue_depth:=4 \
-    max_decode_queue_depth:=4 \
     >"$bridge_log" 2>&1 &
   bridge_pid=$!
   sleep "$bridge_wait_sec"

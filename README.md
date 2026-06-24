@@ -10,7 +10,7 @@ topics on Linux hosts.
 The repository includes:
 
 - ROS1 Noetic and ROS2 Foxy/Jazzy bridge nodes
-- Launch files for full-data, visual, and visual + MID360 workflows
+- Launch files for visual, MID360, and panorama workflows
 - Minimal `livox_ros_driver2` CustomMsg definitions required by the bridge
 - MID360 and full-topic rate check tooling
 
@@ -111,103 +111,35 @@ source install/setup.bash
 
 ## Start The Bridge
 
-ROS1 all streams:
+Choose one launch file. Each user-facing launch accepts only `host`.
+
+Visual data, depth and VIO:
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip>
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
 
-Optional Host-derived panorama:
+Visual data, depth, VIO and MID360:
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
 ```
 
-The default panorama config is `config/pano_mode2.yaml`, which uses Host SDK
-blend mode 2 (`pano_blend=multiband`) and `pano_seam_blend_px=32`.
-
-ROS2 all streams:
+Visual data, depth, VIO and Host-derived panorama:
 
 ```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip>
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_pano.launch host:=<device-ip>
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 ```
 
-Optional Host-derived panorama:
+Public topic names are fixed under `/orbvi`. The panorama launch uses the
+bundled `config/pano_mode2.yaml` / `config/pano_mode2_ros2.yaml` defaults.
 
-```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
-```
-
-The default ROS2 panorama config is `config/pano_mode2_ros2.yaml`, with the same
-mode 2 blend and 32 px seam blend settings.
-
-## Panorama Config
-
-`pano` is a Host SDK-derived panorama stitched from `raw_fisheye_stream`.
-The bridge does not require the device to publish a board-generated
-`pano_display_stream`.
-
-The launch files load a default panorama config:
-
-| ROS | Config file | Format |
-| --- | --- | --- |
-| ROS1 | `config/pano_mode2.yaml` | Flat ROS parameter YAML |
-| ROS2 | `config/pano_mode2_ros2.yaml` | ROS2 node parameter YAML |
-
-Both configs use the current reference defaults:
-
-```yaml
-pano_blend: "multiband"
-pano_seam_blend_px: 32
-pano_width: 2048
-pano_height: 1024
-pano_seam_mode: "fixed"
-pano_photometric_align: true
-```
-
-Override the launch-time config with `pano_config`:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> \
-  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
-  pano_config:=/path/to/pano_mode2.yaml
-
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip> \
-  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
-  pano_config:=/path/to/pano_mode2_ros2.yaml
-```
-
-## Scenario Quickstart
-
-Use the launch file that matches the required runtime capability. Public topics
-are fixed under `/orbvi`.
-
-| Scenario | ROS1 command | ROS2 command | Expected first check |
-| --- | --- | --- | --- |
-| Basic all-data bridge | `roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom` |
-| Camera, depth and VIO | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge_visual.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
-| Camera, depth, VIO and MID360 | `roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>` | `ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry`, `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
-
-Use `orbvi_ros_bridge_visual.launch` when the host only needs visual raw data,
-depth and VIO. Use `orbvi_ros_bridge_mid360.launch` when the same visual
-capability should run together with MID360 point cloud and MID360 IMU.
-
-ROS2 launch files enable Fast DDS shared memory by default on the bridge host:
-
-```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip>
-```
-
-The launch file sets the Fast DDS SHM environment for the bridge process by
-default. Any separate `ros2 topic`, rqt, rviz or consumer process must be
-started with the same environment so it can join the same local SHM transport:
+ROS2 launch files set the bundled Fast DDS shared-memory profile for the bridge
+process. Start standalone ROS2 tools with the same profile when they need to
+consume large local topics:
 
 ```bash
 SHM_PROFILE="$(ros2 pkg prefix orbvi_ros_bridge)/share/orbvi_ros_bridge/config/fastdds_shm.xml"
@@ -220,7 +152,7 @@ ros2 daemon stop
 
 ## Visual And MID360 Data Check
 
-Start the visual + MID360 entry.
+Start the MID360 entry.
 
 ROS1:
 
@@ -283,42 +215,19 @@ Outputs are written to a timestamped directory:
 
 ## Launch Files
 
-Launch files are grouped by ROS version and runtime scenario.
+The public interface is intentionally limited to three launch configurations.
+Each launch accepts only `host`; stream selection and reference settings are
+kept inside the launch file.
 
-| Launch file | ROS | Purpose |
-| --- | --- | --- |
-| `orbvi_ros_bridge.launch` | ROS1 | Default full raw-data entry: visual data, depth, VIO and MID360 |
-| `orbvi_ros_bridge_visual.launch` | ROS1 | Visual entry: four raw decoded images, rectified images, device IMU, disparity, depth and VIO |
-| `orbvi_ros_bridge_mid360.launch` | ROS1 | Visual entry plus MID360 point cloud and MID360 IMU |
-| `orbvi_ros_bridge.launch.py` | ROS2 | Default full raw-data entry: visual data, depth, VIO and MID360 |
-| `orbvi_ros_bridge_visual.launch.py` | ROS2 | Visual entry: four raw decoded images, rectified images, device IMU, disparity, depth and VIO |
-| `orbvi_ros_bridge_mid360.launch.py` | ROS2 | Visual entry plus MID360 point cloud and MID360 IMU |
-
-Common parameters:
+| Capability | ROS1 launch | ROS2 launch | First topics to check |
+| --- | --- | --- | --- |
+| Visual, depth and VIO | `orbvi_ros_bridge.launch` | `orbvi_ros_bridge.launch.py` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
+| Visual, depth, VIO and MID360 | `orbvi_ros_bridge_mid360.launch` | `orbvi_ros_bridge_mid360.launch.py` | `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
+| Visual, depth, VIO and panorama | `orbvi_ros_bridge_pano.launch` | `orbvi_ros_bridge_pano.launch.py` | `/orbvi/pano/image` |
 
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
-| `control_port` | `18088` | ORBVI SDK control port |
-| `connect_timeout_ms` | `2000` | Initial Host SDK connect timeout per attempt |
-| `connect_retry_count` | `4` | Initial Host SDK connect retries after the first failed attempt |
-| `connect_retry_delay_ms` | `1000` | Delay between initial Host SDK connect attempts |
-| `pano_config` | Bundled YAML | Launch-time panorama config file. Defaults to mode 2 / 32 px blend settings |
-| `pano_profile` | `baseline` | Panorama test profile: `baseline`, `ghost_suppression`/`balanced`, or `primary_only` |
-| `pano_width` | `2048` | Host SDK panorama output width when `streams` includes `pano` |
-| `pano_height` | `1024` | Host SDK panorama output height when `streams` includes `pano` |
-| `pano_fov_half_deg` | `95.0` | Half horizontal field of view used by Host SDK panorama stitching |
-| `pano_seam_blend_px` | `32` | Seam blending width for Host SDK panorama stitching |
-| `pano_seam_mode` | `fixed` | Host SDK panorama seam mode: `fixed` or `dynamic`/`dynamic_programming`/`dp` |
-| `pano_dp_seam_band_px` | `96` | Dynamic-programming seam search band width in pixels |
-| `pano_dp_seam_smoothness` | `8.0` | Smoothness penalty used by dynamic-programming seam search |
-| `pano_seam_avoidance_penalty` | `220.0` | Penalty for seam-avoidance masks when dynamic seam selection is enabled |
-| `pano_blend` | `multiband` | Host SDK panorama blend mode: `multiband`/`mode2`, `feather`, or `primary_only` |
-| `pano_photometric_align` | `true` | Enable Host SDK per-frame photometric alignment |
-| `pano_seam_ghost_suppression` | `false` | Enable seam-local ghost suppression during Host SDK panorama stitching |
-| `pano_seam_ghost_threshold` | `80.0` | Color/luma difference threshold used by seam ghost suppression |
-| `use_fastdds_shm` | `true` | Enable the bundled Fast DDS SHM profile for the ROS2 bridge process |
-| `fastdds_shm_profile` | Bundled XML | Fast DDS SHM profile path for ROS2, override when using a custom profile |
 
 Topic names are fixed under `/orbvi`.
 
@@ -385,7 +294,7 @@ Depth output depends on disparity frames and valid calibration from the Host
 SDK:
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_visual.launch \
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
   host:=<device-ip>
 ```
 

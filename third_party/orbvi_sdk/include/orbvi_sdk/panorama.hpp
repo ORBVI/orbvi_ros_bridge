@@ -79,6 +79,7 @@ struct PanoramaStitchOptions {
   double seam_ghost_threshold = 80.0;
   std::vector<PanoramaSeamAvoidanceMaskView> seam_avoidance_masks;
   double seam_avoidance_penalty = 220.0;
+  std::uint32_t max_stitch_threads = 0;
 };
 
 struct PanoramaImageView {

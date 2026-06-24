@@ -123,6 +123,9 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
   host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
 ```
 
+默认全景配置为 `config/pano_mode2.yaml`，使用 Host SDK blend mode 2
+（`pano_blend=multiband`）和 `pano_seam_blend_px=32`。
+
 ROS2 全流：
 
 ```bash
@@ -135,6 +138,46 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
 ```bash
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
   host:=<device-ip> streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio
+```
+
+ROS2 默认全景配置为 `config/pano_mode2_ros2.yaml`，同样使用 mode 2
+和 32 px 接缝融合配置。
+
+## 全景配置
+
+`pano` 是 Host SDK 基于 `raw_fisheye_stream` 拼接出的全景图。
+bridge 不依赖设备端输出 `pano_display_stream`。
+
+Launch 文件默认加载内置全景配置：
+
+| ROS | 配置文件 | 格式 |
+| --- | --- | --- |
+| ROS1 | `config/pano_mode2.yaml` | 扁平 ROS 参数 YAML |
+| ROS2 | `config/pano_mode2_ros2.yaml` | ROS2 节点参数 YAML |
+
+两个配置都使用当前参考默认值：
+
+```yaml
+pano_blend: "multiband"
+pano_seam_blend_px: 32
+pano_width: 2048
+pano_height: 1024
+pano_seam_mode: "fixed"
+pano_photometric_align: true
+```
+
+需要替换配置时传 `pano_config`：
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> \
+  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
+  pano_config:=/path/to/pano_mode2.yaml
+
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> \
+  streams:=raw,rectified,pano,imu,lidar,lidar_imu,disparity,depth,vio \
+  pano_config:=/path/to/pano_mode2_ros2.yaml
 ```
 
 ## 场景速查
@@ -256,6 +299,7 @@ Launch 文件按 ROS 版本和运行场景分组。
 | `connect_timeout_ms` | `2000` | 首次 Host SDK 连接每次尝试的超时时间 |
 | `connect_retry_count` | `4` | 首次连接失败后的重试次数 |
 | `connect_retry_delay_ms` | `1000` | Host SDK 连接重试间隔 |
+| `pano_config` | 内置 YAML | launch 级全景配置文件，默认使用 mode 2 / 32 px 融合配置 |
 | `pano_profile` | `baseline` | 全景测试档位：`baseline`、`ghost_suppression`/`balanced` 或 `primary_only` |
 | `pano_width` | `2048` | `streams` 包含 `pano` 时 Host SDK 全景输出宽度 |
 | `pano_height` | `1024` | `streams` 包含 `pano` 时 Host SDK 全景输出高度 |
@@ -265,7 +309,7 @@ Launch 文件按 ROS 版本和运行场景分组。
 | `pano_dp_seam_band_px` | `96` | 动态规划接缝搜索带宽，单位像素 |
 | `pano_dp_seam_smoothness` | `8.0` | 动态规划接缝搜索使用的平滑惩罚 |
 | `pano_seam_avoidance_penalty` | `220.0` | 启用动态接缝选择时，接缝避让 mask 使用的惩罚值 |
-| `pano_blend` | `feather` | Host SDK 全景融合模式：`feather` 或 `primary_only` |
+| `pano_blend` | `multiband` | Host SDK 全景融合模式：`multiband`/`mode2`、`feather` 或 `primary_only` |
 | `pano_photometric_align` | `true` | 是否启用 Host SDK 全景逐帧曝光对齐 |
 | `pano_seam_ghost_suppression` | `false` | 是否启用 Host SDK 接缝局部重影抑制 |
 | `pano_seam_ghost_threshold` | `80.0` | 接缝重影抑制使用的颜色/亮度差异阈值 |

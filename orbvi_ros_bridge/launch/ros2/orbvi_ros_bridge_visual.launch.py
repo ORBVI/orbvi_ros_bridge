@@ -33,6 +33,15 @@ def generate_launch_description():
         for name, value in ARGUMENT_DEFAULTS.items()
     ]
     arguments.append(DeclareLaunchArgument(
+        "pano_config",
+        default_value=PathJoinSubstitution([
+            FindPackageShare("orbvi_ros_bridge"),
+            "config",
+            "pano_mode2_ros2.yaml",
+        ]),
+        description="Host SDK panorama parameter YAML. Default is mode 2 with 32 px seam blend.",
+    ))
+    arguments.append(DeclareLaunchArgument(
         "fastdds_shm_profile",
         default_value=PathJoinSubstitution([
             FindPackageShare("orbvi_ros_bridge"),
@@ -75,6 +84,6 @@ def generate_launch_description():
             executable="orbvi_ros_bridge_node",
             name="orbvi_ros_bridge",
             output="screen",
-            parameters=[parameters],
+            parameters=[LaunchConfiguration("pano_config"), parameters],
         )
     ])

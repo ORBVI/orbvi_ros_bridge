@@ -230,8 +230,18 @@ if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
   install(DIRECTORY launch/
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
   )
+  install(DIRECTORY config/
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
+    FILES_MATCHING PATTERN "*.yaml"
+  )
 
   if(CATKIN_ENABLE_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(
+      NAME test_orbvi_ros_bridge_launch_contracts
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_contracts.py
+    )
+
     catkin_add_gtest(test_orbvi_ros_bridge_host_sdk_link test/test_host_sdk_link.cpp)
     if(TARGET test_orbvi_ros_bridge_host_sdk_link)
       add_dependencies(test_orbvi_ros_bridge_host_sdk_link ${catkin_EXPORTED_TARGETS})
@@ -258,6 +268,7 @@ else()
   find_package(nav_msgs REQUIRED)
   find_package(livox_ros_driver2 REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
   add_library(orbvi_ros_bridge
     src/bridge_node_ros2.cpp
@@ -307,7 +318,9 @@ else()
   )
   install(DIRECTORY config/
     DESTINATION share/${PROJECT_NAME}/config
-    FILES_MATCHING PATTERN "*.xml"
+    FILES_MATCHING
+      PATTERN "*.xml"
+      PATTERN "*.yaml"
   )
 
   ament_add_gtest(test_orbvi_ros_bridge_host_sdk_link_ros2 test/test_host_sdk_link_ros2.cpp)
@@ -329,6 +342,10 @@ else()
       BUILD_RPATH "${_orbvi_runtime_rpath}"
     )
   endif()
+  add_test(
+    NAME test_orbvi_ros_bridge_launch_contracts
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_contracts.py
+  )
 endif()
 
 if(EXISTS "${_orbvi_sdk_library_dir}" AND _orbvi_sdk_library_dir MATCHES "/third_party/orbvi_sdk/libs/")

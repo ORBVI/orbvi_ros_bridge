@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "orbvi_sdk/frame.hpp"
+#include "orbvi_sdk/image.hpp"
 
 namespace orbvi_sdk {
 
@@ -103,6 +104,18 @@ struct PointCloudGenerationOptions {
   std::string frame_id;
 };
 
+// A decoded rectified left image for one stereo pair. The caller retains ownership
+// of image.data for the duration of GeneratePointCloud().
+struct RectifiedLeftImageView {
+  std::uint32_t pair_id = 0;
+  DecodedImageView image;
+};
+
+struct PointCloudColorizationOptions {
+  // A value of zero requires exactly matching capture timestamps.
+  std::uint64_t max_timestamp_delta_ns = 10'000'000ULL;
+};
+
 struct PointCloudPoint {
   float x = 0.0f;
   float y = 0.0f;
@@ -169,6 +182,21 @@ Result<PointCloud> GeneratePointCloud(
     const OwnedFrame& disparity_frame,
     const DepthCalibration& calibration,
     const PointCloudGenerationOptions& options = {});
+// Generates the same point cloud as GeneratePointCloud(), but replaces the
+// legacy disparity JET pseudo color with true RGB sampled from already-decoded
+// rectified left images. This API neither decodes nor copies image data.
+Result<PointCloud> GeneratePointCloud(
+    const FrameView& disparity_frame,
+    const DepthCalibration& calibration,
+    const std::vector<RectifiedLeftImageView>& rectified_left_images,
+    const PointCloudGenerationOptions& options = {},
+    const PointCloudColorizationOptions& color_options = {});
+Result<PointCloud> GeneratePointCloud(
+    const OwnedFrame& disparity_frame,
+    const DepthCalibration& calibration,
+    const std::vector<RectifiedLeftImageView>& rectified_left_images,
+    const PointCloudGenerationOptions& options = {},
+    const PointCloudColorizationOptions& color_options = {});
 
 const char* ToString(DepthPixelFormat format);
 const char* ToString(DepthInvalidPolicy policy);

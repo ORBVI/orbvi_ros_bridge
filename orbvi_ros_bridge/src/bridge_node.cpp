@@ -4,6 +4,8 @@
 #include <cctype>
 #include <chrono>
 #include <cstdint>
+#include <deque>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -40,10 +42,12 @@ struct BridgeConfig {
   bool publish_depth = false;
   bool publish_depth_viz = true;
   bool publish_depth_pointcloud = true;
+  bool colorize_depth_pointcloud = true;
   bool publish_panorama = false;
   orbvi_sdk::DepthGenerationOptions depth_options;
   DepthVisualizationOptions depth_visualization_options;
   orbvi_sdk::PointCloudGenerationOptions pointcloud_options;
+  orbvi_sdk::PointCloudColorizationOptions pointcloud_color_options;
   orbvi_sdk::PanoramaSubscribeOptions panorama_options;
   std::uint32_t connect_timeout_ms = 2000;
   std::uint32_t connect_retry_count = 4;
@@ -179,6 +183,33 @@ bool ApplyPanoramaProfile(const std::string& value, orbvi_sdk::PanoramaStitchOpt
 
 bool HasStream(const std::vector<orbvi_sdk::StreamId>& streams, orbvi_sdk::StreamId stream) {
   return std::find(streams.begin(), streams.end(), stream) != streams.end();
+}
+
+std::uint64_t TimestampDeltaNs(std::uint64_t first, std::uint64_t second) {
+  return first >= second ? first - second : second - first;
+}
+
+bool RectifiedLeftPairIdFromFrameId(const std::string& frame_id, std::uint32_t* pair_id) {
+  if (pair_id == nullptr) {
+    return false;
+  }
+  if (frame_id == "orbvi/rectified/front/left") {
+    *pair_id = 0;
+    return true;
+  }
+  if (frame_id == "orbvi/rectified/right/left") {
+    *pair_id = 1;
+    return true;
+  }
+  if (frame_id == "orbvi/rectified/rear/left") {
+    *pair_id = 2;
+    return true;
+  }
+  if (frame_id == "orbvi/rectified/left/left") {
+    *pair_id = 3;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -583,6 +614,24 @@ class BridgeNode::Impl {
         "publish_depth_pointcloud",
         config->publish_depth_pointcloud,
         config->publish_depth_pointcloud);
+    private_node_.param<bool>(
+        "colorize_depth_pointcloud",
+        config->colorize_depth_pointcloud,
+        config->colorize_depth_pointcloud);
+    private_node_.param<bool>(
+        "depth_pointcloud_colorize",
+        config->colorize_depth_pointcloud,
+        config->colorize_depth_pointcloud);
+    double color_max_delta_ms =
+        static_cast<double>(config->pointcloud_color_options.max_timestamp_delta_ns) / 1.0e6;
+    private_node_.param<double>(
+        "depth_pointcloud_color_max_delta_ms",
+        color_max_delta_ms,
+        color_max_delta_ms);
+    if (color_max_delta_ms >= 0.0) {
+      config->pointcloud_color_options.max_timestamp_delta_ns =
+          static_cast<std::uint64_t>(color_max_delta_ms * 1.0e6);
+    }
     private_node_.param<double>(
         "depth_viz_min_depth_m",
         config->depth_visualization_options.min_depth_m,
@@ -659,6 +708,10 @@ class BridgeNode::Impl {
         << ", pointcloud_stride="
         << config_.pointcloud_options.sample_stride
         << ", pointcloud_frame=" << orbvi_sdk::ToString(config_.pointcloud_options.output_frame)
+        << ", pointcloud_colorize="
+        << (config_.colorize_depth_pointcloud ? "true" : "false")
+        << ", pointcloud_color_max_delta_ms="
+        << (static_cast<double>(config_.pointcloud_color_options.max_timestamp_delta_ns) / 1.0e6)
         << ", pointcloud_max_disp_jump_px="
         << config_.pointcloud_options.max_disparity_jump_px);
   }
@@ -767,6 +820,7 @@ class BridgeNode::Impl {
   void PublishImages(
       const orbvi_sdk::FrameView& frame,
       const orbvi_sdk::FrameDelivery& delivery) {
+    CacheRectifiedLeftImages(frame, delivery);
     if (config_.publish_compressed_images) {
       std::string skipped_reason;
       for (const auto& output :
@@ -791,6 +845,99 @@ class BridgeNode::Impl {
             .publish(output.message);
       }
     }
+  }
+
+  void CacheRectifiedLeftImages(
+      const orbvi_sdk::FrameView& frame,
+      const orbvi_sdk::FrameDelivery& delivery) {
+    if (frame.stream_id != orbvi_sdk::StreamId::RectifiedFisheye ||
+        !config_.colorize_depth_pointcloud) {
+      return;
+    }
+    const auto cache_one = [this](const orbvi_sdk::OwnedDecodedImage& image) {
+      std::uint32_t pair_id = 0;
+      if (!RectifiedLeftPairIdFromFrameId(image.frame_id, &pair_id) ||
+          image.pixel_format != orbvi_sdk::PixelFormat::Bgr888 ||
+          image.data.empty() || image.width == 0 || image.height == 0 ||
+          image.stride < image.width * 3u) {
+        return;
+      }
+      std::lock_guard<std::mutex> lock(rectified_left_images_mutex_);
+      auto& cache = rectified_left_images_[pair_id];
+      cache.push_back(image);
+      constexpr std::size_t kMaxCachedImagesPerPair = 16;
+      while (cache.size() > kMaxCachedImagesPerPair) {
+        cache.pop_front();
+      }
+    };
+    for (const auto& image : delivery.decoded_images) {
+      cache_one(image);
+    }
+    if (delivery.decoded_image) {
+      cache_one(*delivery.decoded_image);
+    }
+  }
+
+  std::vector<std::pair<std::uint32_t, orbvi_sdk::OwnedDecodedImage>>
+  SnapshotRectifiedLeftImages(std::uint64_t target_timestamp_ns) const {
+    std::vector<std::pair<std::uint32_t, orbvi_sdk::OwnedDecodedImage>> images;
+    if (!depth_calibration_) {
+      return images;
+    }
+    std::lock_guard<std::mutex> lock(rectified_left_images_mutex_);
+    images.reserve(rectified_left_images_.size());
+    for (const auto& entry : rectified_left_images_) {
+      if (entry.first >= depth_calibration_->tile_count || entry.second.empty()) {
+        continue;
+      }
+      auto best = entry.second.begin();
+      std::uint64_t best_delta = TimestampDeltaNs(best->timestamp_ns, target_timestamp_ns);
+      for (auto it = std::next(entry.second.begin()); it != entry.second.end(); ++it) {
+        const std::uint64_t delta = TimestampDeltaNs(it->timestamp_ns, target_timestamp_ns);
+        if (delta < best_delta) {
+          best = it;
+          best_delta = delta;
+        }
+      }
+      if (best_delta <= config_.pointcloud_color_options.max_timestamp_delta_ns) {
+        images.emplace_back(entry.first, *best);
+      }
+    }
+    return images;
+  }
+
+  orbvi_sdk::Result<orbvi_sdk::PointCloud> GenerateDepthPointCloud(
+      const orbvi_sdk::FrameView& source_disparity) const {
+    if (config_.colorize_depth_pointcloud && depth_calibration_) {
+      auto owned_images = SnapshotRectifiedLeftImages(source_disparity.timestamp_ns);
+      if (owned_images.size() >= depth_calibration_->tile_count) {
+        std::vector<orbvi_sdk::RectifiedLeftImageView> image_views;
+        image_views.reserve(owned_images.size());
+        for (const auto& entry : owned_images) {
+          orbvi_sdk::RectifiedLeftImageView view;
+          view.pair_id = entry.first;
+          view.image = entry.second.view();
+          image_views.push_back(view);
+        }
+        auto color_result = orbvi_sdk::GeneratePointCloud(
+            source_disparity,
+            *depth_calibration_,
+            image_views,
+            config_.pointcloud_options,
+            config_.pointcloud_color_options);
+        if (color_result) {
+          return color_result;
+        }
+        ROS_WARN_THROTTLE(
+            5.0,
+            "Failed to generate colorized ORBVI depth PointCloud: %s; falling back",
+            color_result.error().message.c_str());
+      }
+    }
+    return orbvi_sdk::GeneratePointCloud(
+        source_disparity,
+        *depth_calibration_,
+        config_.pointcloud_options);
   }
 
   void PublishPanorama(const orbvi_sdk::PanoramaFrameDelivery& delivery) {
@@ -875,8 +1022,7 @@ class BridgeNode::Impl {
       }
     }
     if (config_.publish_depth_pointcloud && depth_calibration_) {
-      auto cloud_result =
-          orbvi_sdk::GeneratePointCloud(source_disparity, *depth_calibration_, config_.pointcloud_options);
+      auto cloud_result = GenerateDepthPointCloud(source_disparity);
       if (!cloud_result) {
         ROS_WARN_THROTTLE(
             5.0,
@@ -917,6 +1063,8 @@ class BridgeNode::Impl {
   std::optional<orbvi_sdk::DepthCalibration> depth_calibration_;
   std::optional<orbvi_sdk::PanoramaSubscriptionHandle> panorama_subscription_;
   std::vector<orbvi_sdk::SubscriptionHandle> subscriptions_;
+  mutable std::mutex rectified_left_images_mutex_;
+  std::map<std::uint32_t, std::deque<orbvi_sdk::OwnedDecodedImage>> rectified_left_images_;
   std::mutex publishers_mutex_;
   std::map<std::string, ros::Publisher> publishers_;
 };

@@ -1,13 +1,16 @@
 #include "frame_conversions.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <sstream>
 #include <type_traits>
+#include <utility>
 
 #include <boost/array.hpp>
 #include <livox_ros_driver2/CustomPoint.h>
@@ -28,11 +31,32 @@ constexpr std::size_t kLivoxCustomHeaderBytes =
     3 * sizeof(std::uint8_t);
 constexpr std::size_t kLivoxCustomPointBytes =
     sizeof(std::uint32_t) + 3 * sizeof(float) + 3 * sizeof(std::uint8_t);
+constexpr std::uint32_t kDepthPanoramaWidth = 2048;
+constexpr std::uint32_t kDepthPanoramaFullHeight = 1024;
+constexpr std::uint32_t kDepthPanoramaCropTop = 280;
+constexpr std::uint32_t kDepthPanoramaCropBottom = 280;
+constexpr double kDepthPanoramaMinDisparityPx = 0.5;
+constexpr double kDepthPanoramaMinRangeM = 0.1;
+constexpr double kDepthPanoramaMaxRangeM = 20.0;
+constexpr const char* kDepthPanoramaFrameId = "orbvi/depth/panorama";
+constexpr double kPi = 3.141592653589793238462643383279502884;
 
 struct Rgb {
   std::uint8_t r = 0;
   std::uint8_t g = 0;
   std::uint8_t b = 0;
+};
+
+struct DecodedDisparityLayout {
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::uint32_t tile_count = 0;
+  std::uint32_t tile_width = 0;
+  std::uint32_t tile_height = 0;
+  std::size_t bytes_per_pixel = 0;
+  std::size_t stride = 0;
+  double decode_scale = 1.0;
+  std::string invalid_value;
 };
 
 std::string Trim(const std::string& value) {
@@ -104,6 +128,60 @@ bool ParseSize(const std::string& value, std::size_t* out) {
   }
   *out = static_cast<std::size_t>(parsed);
   return true;
+}
+
+double ParseDoubleOr(const std::string& value, double fallback) {
+  if (value.empty()) {
+    return fallback;
+  }
+  char* end = nullptr;
+  const double parsed = std::strtod(value.c_str(), &end);
+  return end == value.c_str() ? fallback : parsed;
+}
+
+std::uint32_t MetadataU32(
+    const MetadataMap& metadata,
+    const std::string& key,
+    std::uint32_t fallback) {
+  std::uint32_t value = 0;
+  return ParseU32(MetadataValue(metadata, key), &value) ? value : fallback;
+}
+
+double MetadataDouble(
+    const MetadataMap& metadata,
+    const std::string& key,
+    double fallback) {
+  return ParseDoubleOr(MetadataValue(metadata, key), fallback);
+}
+
+bool SetError(std::string* error, const std::string& message) {
+  if (error != nullptr) {
+    *error = message;
+  }
+  return false;
+}
+
+float ReadFloat32(const std::uint8_t* data) {
+  float value = 0.0f;
+  std::memcpy(&value, data, sizeof(value));
+  return value;
+}
+
+std::uint16_t ReadU16Le(const std::uint8_t* data) {
+  return static_cast<std::uint16_t>(data[0]) |
+         static_cast<std::uint16_t>(static_cast<std::uint16_t>(data[1]) << 8u);
+}
+
+bool IsInvalidFloatDisparity(float value, const std::string& invalid_value) {
+  if (!std::isfinite(value)) {
+    return true;
+  }
+  if (invalid_value == "nan") {
+    return false;
+  }
+  char* end = nullptr;
+  const double invalid = std::strtod(invalid_value.c_str(), &end);
+  return end != invalid_value.c_str() && value == static_cast<float>(invalid);
 }
 
 std::uint64_t SystemNowNs() {
@@ -504,6 +582,129 @@ bool TileForDepthRow(
   return *local_y < candidate.height;
 }
 
+bool MakeDisparityLayout(
+    const orbvi_sdk::FrameView& frame,
+    const orbvi_sdk::DepthCalibration& calibration,
+    DecodedDisparityLayout* layout,
+    std::string* error) {
+  if (layout == nullptr) {
+    return SetError(error, "disparity layout output is null");
+  }
+  if (!orbvi_sdk::IsDisparityFrame(frame)) {
+    return SetError(error, "input frame is not disparity");
+  }
+  if (frame.metadata == nullptr || frame.payload_data == nullptr) {
+    return SetError(error, "disparity frame is incomplete");
+  }
+  if (calibration.tiles.empty()) {
+    return SetError(error, "depth calibration is empty");
+  }
+  const MetadataMap& metadata = *frame.metadata;
+  DecodedDisparityLayout parsed;
+  parsed.width = MetadataU32(metadata, "width", calibration.width);
+  parsed.height = MetadataU32(metadata, "height", calibration.height);
+  parsed.tile_count =
+      MetadataU32(metadata, "disparity_tile_count", calibration.tile_count);
+  parsed.tile_width =
+      MetadataU32(metadata, "disparity_tile_width", calibration.tile_width);
+  parsed.tile_height =
+      MetadataU32(metadata, "disparity_tile_height", calibration.tile_height);
+  parsed.bytes_per_pixel =
+      frame.format == orbvi_sdk::FrameFormat::Disparity16UQ8 ? 2u : 4u;
+  parsed.stride = MetadataU32(
+      metadata,
+      "stride",
+      static_cast<std::uint32_t>(parsed.width * parsed.bytes_per_pixel));
+  if (parsed.width == 0 || parsed.height == 0 || parsed.tile_count == 0 ||
+      parsed.tile_width == 0 || parsed.tile_height == 0 ||
+      parsed.width != calibration.width || parsed.height != calibration.height ||
+      parsed.tile_count > calibration.tiles.size() ||
+      parsed.stride < static_cast<std::size_t>(parsed.width) * parsed.bytes_per_pixel) {
+    return SetError(error, "disparity layout mismatch");
+  }
+  const std::size_t expected_payload =
+      static_cast<std::size_t>(parsed.height - 1u) * parsed.stride +
+      static_cast<std::size_t>(parsed.width) * parsed.bytes_per_pixel;
+  if (frame.payload_size < expected_payload) {
+    return SetError(error, "disparity payload size mismatch");
+  }
+
+  parsed.decode_scale = MetadataDouble(metadata, "disparity_decode_scale", 0.0);
+  if (parsed.decode_scale <= 0.0) {
+    const double disparity_scale = MetadataDouble(metadata, "disparity_scale", 1.0);
+    parsed.decode_scale =
+        frame.format == orbvi_sdk::FrameFormat::Disparity16UQ8 && disparity_scale > 0.0
+            ? 1.0 / disparity_scale
+            : 1.0;
+  }
+  const auto invalid_it = metadata.find("disparity_invalid_value");
+  const auto legacy_invalid_it = metadata.find("invalid_value");
+  parsed.invalid_value =
+      invalid_it != metadata.end()
+          ? invalid_it->second
+          : (legacy_invalid_it != metadata.end() ? legacy_invalid_it->second : "nan");
+
+  *layout = std::move(parsed);
+  return true;
+}
+
+bool ReadDisparityPx(
+    const orbvi_sdk::FrameView& frame,
+    const DecodedDisparityLayout& layout,
+    std::uint32_t x,
+    std::uint32_t y,
+    double* out) {
+  if (out == nullptr || x >= layout.width || y >= layout.height ||
+      frame.payload_data == nullptr) {
+    return false;
+  }
+  const std::size_t offset =
+      static_cast<std::size_t>(y) * layout.stride +
+      static_cast<std::size_t>(x) * layout.bytes_per_pixel;
+  double disparity_px = 0.0;
+  bool valid = true;
+  if (frame.format == orbvi_sdk::FrameFormat::Disparity16UQ8) {
+    const std::uint16_t raw = ReadU16Le(frame.payload_data + offset);
+    valid = layout.invalid_value != "0" || raw != 0;
+    disparity_px = static_cast<double>(raw) * layout.decode_scale;
+  } else {
+    const float raw = ReadFloat32(frame.payload_data + offset);
+    valid = !IsInvalidFloatDisparity(raw, layout.invalid_value);
+    disparity_px = static_cast<double>(raw);
+  }
+  if (!valid || !std::isfinite(disparity_px)) {
+    return false;
+  }
+  *out = disparity_px;
+  return true;
+}
+
+double Dot3(const std::array<double, 3>& lhs, const std::array<double, 3>& rhs) {
+  return lhs[0] * rhs[0] + lhs[1] * rhs[1] + lhs[2] * rhs[2];
+}
+
+std::array<double, 3> RectDirectionFromWorld(
+    const orbvi_sdk::DepthTileCalibration& tile,
+    const std::array<double, 3>& world_direction) {
+  const auto& r = tile.rotation_world;
+  return {
+      r[0] * world_direction[0] + r[3] * world_direction[1] + r[6] * world_direction[2],
+      r[1] * world_direction[0] + r[4] * world_direction[1] + r[7] * world_direction[2],
+      r[2] * world_direction[0] + r[5] * world_direction[1] + r[8] * world_direction[2],
+  };
+}
+
+const orbvi_sdk::DepthTileCalibration* FindTileByIndex(
+    const orbvi_sdk::DepthCalibration& calibration,
+    std::uint32_t tile_index) {
+  for (const auto& tile : calibration.tiles) {
+    if (tile.tile_index == tile_index) {
+      return &tile;
+    }
+  }
+  return nullptr;
+}
+
 bool MakeSingleCompressedImage(
     const orbvi_sdk::FrameView& frame,
     const MetadataMap& metadata,
@@ -615,6 +816,94 @@ void CopyBgrMatToImage(
     const auto* row = bgr.ptr<std::uint8_t>(static_cast<int>(y));
     std::copy(row, row + out->step, out->data.data() + static_cast<std::size_t>(y) * out->step);
   }
+}
+
+std::size_t BytesPerPixelForEncoding(const std::string& encoding) {
+  if (encoding == "bgr8" || encoding == "rgb8") {
+    return 3u;
+  }
+  if (encoding == "32FC1") {
+    return 4u;
+  }
+  if (encoding == "16UC1") {
+    return 2u;
+  }
+  return 0u;
+}
+
+bool SliceImageRows(
+    const sensor_msgs::Image& source,
+    std::uint32_t y0,
+    std::uint32_t width,
+    std::uint32_t height,
+    const std::string& frame_id,
+    sensor_msgs::Image* out) {
+  if (out == nullptr || source.data.empty() || width == 0 || height == 0 ||
+      y0 > source.height || height > source.height - y0 || width > source.width) {
+    return false;
+  }
+  const std::size_t bytes_per_pixel = BytesPerPixelForEncoding(source.encoding);
+  if (bytes_per_pixel == 0 && width != source.width) {
+    return false;
+  }
+  const std::uint32_t row_bytes =
+      bytes_per_pixel == 0
+          ? source.step
+          : static_cast<std::uint32_t>(width * bytes_per_pixel);
+  if (source.step < row_bytes) {
+    return false;
+  }
+  const std::size_t required_size =
+      static_cast<std::size_t>(source.step) * static_cast<std::size_t>(source.height);
+  if (source.data.size() < required_size) {
+    return false;
+  }
+
+  out->header = source.header;
+  out->header.frame_id = frame_id;
+  out->height = height;
+  out->width = width;
+  out->encoding = source.encoding;
+  out->is_bigendian = source.is_bigendian;
+  out->step = row_bytes;
+  out->data.resize(static_cast<std::size_t>(row_bytes) * height);
+  for (std::uint32_t row = 0; row < height; ++row) {
+    const auto src_offset =
+        static_cast<std::size_t>(y0 + row) * static_cast<std::size_t>(source.step);
+    const auto dst_offset = static_cast<std::size_t>(row) * row_bytes;
+    std::copy(
+        source.data.data() + src_offset,
+        source.data.data() + src_offset + row_bytes,
+        out->data.data() + dst_offset);
+  }
+  return true;
+}
+
+std::vector<ImageOutput> SplitVerticalTileImage(
+    const sensor_msgs::Image& source,
+    const orbvi_sdk::DepthCalibration& calibration,
+    const std::string& leaf) {
+  std::vector<ImageOutput> outputs;
+  outputs.reserve(calibration.tiles.size());
+  for (const auto& tile : calibration.tiles) {
+    const std::string direction = RectifiedDirectionForPairSide(tile.tile_index, "left");
+    if (direction.empty()) {
+      continue;
+    }
+    const std::uint32_t y0 = tile.tile_index * calibration.tile_height;
+    ImageOutput output;
+    output.topic_suffix = direction + "/" + leaf;
+    if (SliceImageRows(
+            source,
+            y0,
+            tile.width,
+            tile.height,
+            "orbvi/" + direction + "/" + leaf,
+            &output.message)) {
+      outputs.push_back(std::move(output));
+    }
+  }
+  return outputs;
 }
 
 }  // namespace
@@ -882,6 +1171,16 @@ bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::Image* o
   return SlicePayload(frame, 0, frame.payload_size, &out->data);
 }
 
+std::vector<ImageOutput> MakeSplitDisparityImages(
+    const orbvi_sdk::FrameView& frame,
+    const orbvi_sdk::DepthCalibration& calibration) {
+  sensor_msgs::Image image;
+  if (!MakeDisparityImage(frame, &image)) {
+    return {};
+  }
+  return SplitVerticalTileImage(image, calibration, "disparity");
+}
+
 bool MakeDepthImage(const orbvi_sdk::DepthMapView& depth, sensor_msgs::Image* out) {
   if (out == nullptr || depth.data == nullptr ||
       depth.width == 0 || depth.height == 0 || depth.stride == 0) {
@@ -900,6 +1199,274 @@ bool MakeDepthImage(const orbvi_sdk::DepthMapView& depth, sensor_msgs::Image* ou
   out->is_bigendian = 0;
   out->step = depth.stride;
   out->data.assign(depth.data, depth.data + expected_size);
+  return true;
+}
+
+std::vector<ImageOutput> MakeSplitDepthImages(
+    const orbvi_sdk::DepthMapView& depth,
+    const orbvi_sdk::DepthCalibration& calibration) {
+  sensor_msgs::Image image;
+  if (!MakeDepthImage(depth, &image)) {
+    return {};
+  }
+  return SplitVerticalTileImage(image, calibration, "depth");
+}
+
+bool BuildDepthPanoramaLookup(
+    const orbvi_sdk::DepthCalibration& calibration,
+    DepthPanoramaLookup* out,
+    std::string* error) {
+  if (out == nullptr) {
+    return SetError(error, "depth panorama lookup output is null");
+  }
+  if (calibration.tiles.empty() || calibration.tile_count == 0) {
+    return SetError(error, "depth calibration is empty");
+  }
+  if (kDepthPanoramaCropTop + kDepthPanoramaCropBottom >= kDepthPanoramaFullHeight) {
+    return SetError(error, "depth panorama crop removes all rows");
+  }
+  const std::uint32_t output_height =
+      kDepthPanoramaFullHeight - kDepthPanoramaCropTop - kDepthPanoramaCropBottom;
+  const std::size_t sample_count =
+      static_cast<std::size_t>(kDepthPanoramaWidth) * output_height;
+  for (const auto& tile : calibration.tiles) {
+    if (!tile.has_world_transform) {
+      return SetError(error, "depth panorama requires rectified tile world transforms");
+    }
+    if (tile.tile_index >= calibration.tile_count || tile.width == 0 ||
+        tile.height == 0 || tile.fx_px <= 0.0 || tile.fy_px <= 0.0) {
+      return SetError(error, "depth panorama tile calibration is incomplete");
+    }
+  }
+
+  DepthPanoramaLookup lookup;
+  lookup.width = kDepthPanoramaWidth;
+  lookup.height = output_height;
+  lookup.full_height = kDepthPanoramaFullHeight;
+  lookup.crop_top = kDepthPanoramaCropTop;
+  lookup.crop_bottom = kDepthPanoramaCropBottom;
+  lookup.calibration_version = calibration.calibration_version;
+  lookup.calibration_hash = calibration.calibration_hash;
+  lookup.samples.assign(sample_count, DepthPanoramaSample{});
+
+  std::size_t valid_count = 0;
+  for (std::uint32_t v = 0; v < output_height; ++v) {
+    const std::uint32_t src_v = v + kDepthPanoramaCropTop;
+    const double elevation =
+        (kPi / 2.0) -
+        (static_cast<double>(src_v) + 0.5) /
+            static_cast<double>(kDepthPanoramaFullHeight) * kPi;
+    const double cos_el = std::cos(elevation);
+    const double sin_el = std::sin(elevation);
+
+    for (std::uint32_t u = 0; u < kDepthPanoramaWidth; ++u) {
+      const double azimuth =
+          (static_cast<double>(u) + 0.5) /
+          static_cast<double>(kDepthPanoramaWidth) * 2.0 * kPi;
+      const std::array<double, 3> dir_world = {
+          cos_el * std::sin(azimuth),
+          -sin_el,
+          cos_el * std::cos(azimuth),
+      };
+
+      const orbvi_sdk::DepthTileCalibration* best_tile = nullptr;
+      std::array<double, 3> best_rect = {0.0, 0.0, 0.0};
+      double best_z = -1.0;
+      for (const auto& tile : calibration.tiles) {
+        const auto dir_rect = RectDirectionFromWorld(tile, dir_world);
+        if (dir_rect[2] > best_z) {
+          best_z = dir_rect[2];
+          best_tile = &tile;
+          best_rect = dir_rect;
+        }
+      }
+      if (best_tile == nullptr || best_z <= 1e-6) {
+        continue;
+      }
+
+      const double px =
+          best_tile->fx_px * best_rect[0] / best_rect[2] + best_tile->cx_px;
+      const double py =
+          best_tile->fy_px * best_rect[1] / best_rect[2] + best_tile->cy_px;
+      const int rect_x = static_cast<int>(std::round(px));
+      const int rect_y = static_cast<int>(std::round(py));
+      if (rect_x < 0 || rect_y < 0 ||
+          rect_x >= static_cast<int>(best_tile->width) ||
+          rect_y >= static_cast<int>(best_tile->height)) {
+        continue;
+      }
+
+      DepthPanoramaSample& sample =
+          lookup.samples[static_cast<std::size_t>(v) * kDepthPanoramaWidth + u];
+      sample.tile_index = static_cast<std::int32_t>(best_tile->tile_index);
+      sample.x = static_cast<std::uint32_t>(rect_x);
+      sample.y = static_cast<std::uint32_t>(rect_y);
+      sample.range_scale =
+          static_cast<float>(std::sqrt(Dot3(best_rect, best_rect)) / best_rect[2]);
+      ++valid_count;
+    }
+  }
+  if (valid_count == 0) {
+    return SetError(error, "depth panorama lookup has no valid pixels");
+  }
+  *out = std::move(lookup);
+  return true;
+}
+
+bool MakeDepthPanoramaImage(
+    const orbvi_sdk::FrameView& disparity_frame,
+    const orbvi_sdk::DepthCalibration& calibration,
+    const DepthPanoramaLookup& lookup,
+    sensor_msgs::Image* out,
+    std::string* error) {
+  if (out == nullptr) {
+    return SetError(error, "depth panorama image output is null");
+  }
+  DecodedDisparityLayout layout;
+  if (!MakeDisparityLayout(disparity_frame, calibration, &layout, error)) {
+    return false;
+  }
+  const std::size_t sample_count =
+      static_cast<std::size_t>(lookup.width) * lookup.height;
+  if (lookup.width == 0 || lookup.height == 0 || lookup.samples.size() != sample_count) {
+    return SetError(error, "depth panorama lookup layout is invalid");
+  }
+  if ((!lookup.calibration_version.empty() &&
+       !calibration.calibration_version.empty() &&
+       lookup.calibration_version != calibration.calibration_version) ||
+      (!lookup.calibration_hash.empty() &&
+       !calibration.calibration_hash.empty() &&
+       lookup.calibration_hash != calibration.calibration_hash)) {
+    return SetError(
+        error,
+        "depth panorama lookup calibration does not match current calibration");
+  }
+  if ((!disparity_frame.calibration_version.empty() &&
+       !calibration.calibration_version.empty() &&
+       disparity_frame.calibration_version != calibration.calibration_version) ||
+      (!disparity_frame.calibration_hash.empty() &&
+       !calibration.calibration_hash.empty() &&
+       disparity_frame.calibration_hash != calibration.calibration_hash)) {
+    return SetError(
+        error,
+        "disparity frame calibration does not match depth panorama calibration");
+  }
+
+  out->header = MakeHeader(disparity_frame.timestamp_ns, kDepthPanoramaFrameId);
+  out->height = lookup.height;
+  out->width = lookup.width;
+  out->encoding = "32FC1";
+  out->is_bigendian = 0;
+  out->step = lookup.width * sizeof(float);
+  out->data.assign(sample_count * sizeof(float), 0);
+
+  for (std::uint32_t v = 0; v < lookup.height; ++v) {
+    for (std::uint32_t u = 0; u < lookup.width; ++u) {
+      const std::size_t index = static_cast<std::size_t>(v) * lookup.width + u;
+      const auto& sample = lookup.samples[index];
+      if (sample.tile_index < 0 ||
+          static_cast<std::uint32_t>(sample.tile_index) >= layout.tile_count) {
+        continue;
+      }
+      const auto* tile =
+          FindTileByIndex(calibration, static_cast<std::uint32_t>(sample.tile_index));
+      if (tile == nullptr || sample.x >= tile->width || sample.y >= tile->height) {
+        continue;
+      }
+      const std::uint32_t disparity_y =
+          tile->tile_index * layout.tile_height + sample.y;
+      if (disparity_y >= layout.height) {
+        continue;
+      }
+
+      double disparity_px = 0.0;
+      if (!ReadDisparityPx(
+              disparity_frame,
+              layout,
+              sample.x,
+              disparity_y,
+              &disparity_px) ||
+          disparity_px < kDepthPanoramaMinDisparityPx) {
+        continue;
+      }
+      const double depth_z_m = tile->fx_px * tile->baseline_m / disparity_px;
+      const double range_m = depth_z_m * sample.range_scale;
+      if (!std::isfinite(range_m) ||
+          range_m < kDepthPanoramaMinRangeM ||
+          range_m > kDepthPanoramaMaxRangeM) {
+        continue;
+      }
+      const float range_f = static_cast<float>(range_m);
+      std::memcpy(out->data.data() + index * sizeof(float), &range_f, sizeof(range_f));
+    }
+  }
+  return true;
+}
+
+bool MakeDepthPanoramaVisualizationImage(
+    const sensor_msgs::Image& depth_panorama,
+    sensor_msgs::Image* out) {
+  if (out == nullptr || depth_panorama.encoding != "32FC1" ||
+      depth_panorama.width == 0 || depth_panorama.height == 0 ||
+      depth_panorama.step < depth_panorama.width * sizeof(float)) {
+    return false;
+  }
+  const std::size_t required_size =
+      static_cast<std::size_t>(depth_panorama.step) * depth_panorama.height;
+  if (depth_panorama.data.size() < required_size) {
+    return false;
+  }
+
+  out->header = depth_panorama.header;
+  out->height = depth_panorama.height;
+  out->width = depth_panorama.width;
+  out->encoding = "bgr8";
+  out->is_bigendian = 0;
+  out->step = depth_panorama.width * 3u;
+  out->data.assign(static_cast<std::size_t>(out->step) * out->height, 0);
+
+  std::vector<float> inverse_depth(static_cast<std::size_t>(depth_panorama.width) *
+                                   depth_panorama.height, 0.0f);
+  float min_inverse = std::numeric_limits<float>::infinity();
+  float max_inverse = 0.0f;
+  for (std::uint32_t y = 0; y < depth_panorama.height; ++y) {
+    for (std::uint32_t x = 0; x < depth_panorama.width; ++x) {
+      const std::size_t input_offset =
+          static_cast<std::size_t>(y) * depth_panorama.step +
+          static_cast<std::size_t>(x) * sizeof(float);
+      float range_m = 0.0f;
+      std::memcpy(&range_m, depth_panorama.data.data() + input_offset, sizeof(range_m));
+      if (!std::isfinite(range_m) || range_m <= 0.0f) {
+        continue;
+      }
+      const float inv = 1.0f / range_m;
+      inverse_depth[static_cast<std::size_t>(y) * depth_panorama.width + x] = inv;
+      min_inverse = std::min(min_inverse, inv);
+      max_inverse = std::max(max_inverse, inv);
+    }
+  }
+
+  if (!std::isfinite(min_inverse) || max_inverse <= 0.0f) {
+    return true;
+  }
+
+  const double span = static_cast<double>(max_inverse) - static_cast<double>(min_inverse);
+  for (std::uint32_t y = 0; y < depth_panorama.height; ++y) {
+    for (std::uint32_t x = 0; x < depth_panorama.width; ++x) {
+      const float inv = inverse_depth[static_cast<std::size_t>(y) * depth_panorama.width + x];
+      if (inv <= 0.0f) {
+        continue;
+      }
+      const double normalized =
+          span > 1e-12 ? (static_cast<double>(inv) - min_inverse) / span : 1.0;
+      const Rgb rgb = JetColor(normalized);
+      const std::size_t output_offset =
+          static_cast<std::size_t>(y) * out->step + static_cast<std::size_t>(x) * 3u;
+      out->data[output_offset + 0] = rgb.b;
+      out->data[output_offset + 1] = rgb.g;
+      out->data[output_offset + 2] = rgb.r;
+    }
+  }
   return true;
 }
 
@@ -959,6 +1526,18 @@ bool MakeDepthVisualizationImage(
 
   CopyBgrMatToImage(viz_color, MakeHeader(source_disparity), out);
   return true;
+}
+
+std::vector<ImageOutput> MakeSplitDepthVisualizationImages(
+    const orbvi_sdk::DepthMapView& depth,
+    const orbvi_sdk::FrameView& source_disparity,
+    const DepthVisualizationOptions& options,
+    const orbvi_sdk::DepthCalibration& calibration) {
+  sensor_msgs::Image image;
+  if (!MakeDepthVisualizationImage(depth, source_disparity, options, &image)) {
+    return {};
+  }
+  return SplitVerticalTileImage(image, calibration, "depth/viz");
 }
 
 bool MakeDepthPointCloud(

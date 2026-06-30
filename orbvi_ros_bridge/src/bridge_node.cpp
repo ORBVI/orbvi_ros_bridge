@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <iterator>
@@ -42,6 +43,7 @@ struct BridgeConfig {
   bool publish_depth = false;
   bool publish_depth_viz = true;
   bool publish_depth_pointcloud = true;
+  bool publish_depth_panorama = true;
   bool colorize_depth_pointcloud = true;
   bool publish_panorama = false;
   orbvi_sdk::DepthGenerationOptions depth_options;
@@ -212,6 +214,30 @@ bool RectifiedLeftPairIdFromFrameId(const std::string& frame_id, std::uint32_t* 
   return false;
 }
 
+orbvi_sdk::OwnedFrame CopyFrameView(const orbvi_sdk::FrameView& frame) {
+  orbvi_sdk::OwnedFrame out;
+  out.header.stream_id = frame.stream_id;
+  out.header.format = frame.format;
+  out.header.compression = frame.compression;
+  out.header.timestamp_ns = frame.timestamp_ns;
+  out.frame_id = frame.frame_id;
+  out.header.frame_id_size = static_cast<std::uint16_t>(out.frame_id.size());
+  if (frame.metadata != nullptr) {
+    out.metadata = *frame.metadata;
+  }
+  if (!frame.calibration_version.empty()) {
+    out.metadata["calibration_version"] = frame.calibration_version;
+  }
+  if (!frame.calibration_hash.empty()) {
+    out.metadata["calibration_hash"] = frame.calibration_hash;
+  }
+  if (frame.payload_data != nullptr && frame.payload_size > 0) {
+    out.payload.assign(frame.payload_data, frame.payload_data + frame.payload_size);
+  }
+  out.header.payload_size = static_cast<std::uint32_t>(out.payload.size());
+  return out;
+}
+
 }  // namespace
 
 class BridgeNode::Impl {
@@ -242,6 +268,7 @@ class BridgeNode::Impl {
     }
 
     PrepareDepthPublisher();
+    StartDepthDerivedWorker();
 
     for (const auto stream : config_.streams) {
       if (!Subscribe(stream)) {
@@ -273,6 +300,7 @@ class BridgeNode::Impl {
       client_->disconnect();
       client_.reset();
     }
+    StopDepthDerivedWorker();
     std::lock_guard<std::mutex> lock(publishers_mutex_);
     publishers_.clear();
   }
@@ -678,6 +706,7 @@ class BridgeNode::Impl {
 
   void PrepareDepthPublisher() {
     depth_calibration_.reset();
+    depth_panorama_lookup_.reset();
     if (!config_.publish_depth) {
       return;
     }
@@ -698,6 +727,16 @@ class BridgeNode::Impl {
       return;
     }
     depth_calibration_ = calibration.value();
+    if (config_.publish_depth_panorama) {
+      DepthPanoramaLookup lookup;
+      std::string error;
+      if (BuildDepthPanoramaLookup(*depth_calibration_, &lookup, &error)) {
+        depth_panorama_lookup_ = std::move(lookup);
+      } else {
+        config_.publish_depth_panorama = false;
+        ROS_WARN_STREAM("Depth panorama output disabled: " << error);
+      }
+    }
     ROS_INFO_STREAM(
         "Depth output enabled on /depth, format="
         << orbvi_sdk::ToString(config_.depth_options.output_format)
@@ -710,10 +749,79 @@ class BridgeNode::Impl {
         << ", pointcloud_frame=" << orbvi_sdk::ToString(config_.pointcloud_options.output_frame)
         << ", pointcloud_colorize="
         << (config_.colorize_depth_pointcloud ? "true" : "false")
+        << ", panorama="
+        << (config_.publish_depth_panorama && depth_panorama_lookup_ ? "true" : "false")
         << ", pointcloud_color_max_delta_ms="
         << (static_cast<double>(config_.pointcloud_color_options.max_timestamp_delta_ns) / 1.0e6)
         << ", pointcloud_max_disp_jump_px="
         << config_.pointcloud_options.max_disparity_jump_px);
+  }
+
+  void StartDepthDerivedWorker() {
+    StopDepthDerivedWorker();
+    if (!config_.publish_depth ||
+        (!config_.publish_depth_pointcloud && !config_.publish_depth_panorama)) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(depth_derived_mutex_);
+      depth_derived_stop_ = false;
+      depth_derived_pending_ = false;
+    }
+    depth_derived_worker_ = std::thread([this]() { DepthDerivedWorkerLoop(); });
+  }
+
+  void StopDepthDerivedWorker() {
+    {
+      std::lock_guard<std::mutex> lock(depth_derived_mutex_);
+      depth_derived_stop_ = true;
+      depth_derived_pending_ = false;
+    }
+    depth_derived_cv_.notify_all();
+    if (depth_derived_worker_.joinable()) {
+      depth_derived_worker_.join();
+    }
+    {
+      std::lock_guard<std::mutex> lock(depth_derived_mutex_);
+      depth_derived_stop_ = false;
+    }
+  }
+
+  void EnqueueDepthDerivedFrame(const orbvi_sdk::FrameView& frame) {
+    if (!config_.publish_depth ||
+        (!config_.publish_depth_pointcloud && !config_.publish_depth_panorama)) {
+      return;
+    }
+    orbvi_sdk::OwnedFrame copy = CopyFrameView(frame);
+    {
+      std::lock_guard<std::mutex> lock(depth_derived_mutex_);
+      if (depth_derived_stop_) {
+        return;
+      }
+      depth_derived_frame_ = std::move(copy);
+      depth_derived_pending_ = true;
+    }
+    depth_derived_cv_.notify_one();
+  }
+
+  void DepthDerivedWorkerLoop() {
+    while (true) {
+      orbvi_sdk::OwnedFrame frame;
+      {
+        std::unique_lock<std::mutex> lock(depth_derived_mutex_);
+        depth_derived_cv_.wait(lock, [this]() {
+          return depth_derived_stop_ || depth_derived_pending_;
+        });
+        if (depth_derived_stop_) {
+          return;
+        }
+        frame = std::move(depth_derived_frame_);
+        depth_derived_pending_ = false;
+      }
+      const auto view = frame.view();
+      PublishDepthPointCloud(view);
+      PublishDepthPanorama(view);
+    }
   }
 
   bool Subscribe(orbvi_sdk::StreamId stream) {
@@ -864,7 +972,7 @@ class BridgeNode::Impl {
       }
       std::lock_guard<std::mutex> lock(rectified_left_images_mutex_);
       auto& cache = rectified_left_images_[pair_id];
-      cache.push_back(image);
+      cache.push_back(std::make_shared<orbvi_sdk::OwnedDecodedImage>(image));
       constexpr std::size_t kMaxCachedImagesPerPair = 16;
       while (cache.size() > kMaxCachedImagesPerPair) {
         cache.pop_front();
@@ -878,9 +986,10 @@ class BridgeNode::Impl {
     }
   }
 
-  std::vector<std::pair<std::uint32_t, orbvi_sdk::OwnedDecodedImage>>
+  std::vector<std::pair<std::uint32_t, std::shared_ptr<const orbvi_sdk::OwnedDecodedImage>>>
   SnapshotRectifiedLeftImages(std::uint64_t target_timestamp_ns) const {
-    std::vector<std::pair<std::uint32_t, orbvi_sdk::OwnedDecodedImage>> images;
+    std::vector<std::pair<std::uint32_t, std::shared_ptr<const orbvi_sdk::OwnedDecodedImage>>>
+        images;
     if (!depth_calibration_) {
       return images;
     }
@@ -891,9 +1000,9 @@ class BridgeNode::Impl {
         continue;
       }
       auto best = entry.second.begin();
-      std::uint64_t best_delta = TimestampDeltaNs(best->timestamp_ns, target_timestamp_ns);
+      std::uint64_t best_delta = TimestampDeltaNs((*best)->timestamp_ns, target_timestamp_ns);
       for (auto it = std::next(entry.second.begin()); it != entry.second.end(); ++it) {
-        const std::uint64_t delta = TimestampDeltaNs(it->timestamp_ns, target_timestamp_ns);
+        const std::uint64_t delta = TimestampDeltaNs((*it)->timestamp_ns, target_timestamp_ns);
         if (delta < best_delta) {
           best = it;
           best_delta = delta;
@@ -916,7 +1025,7 @@ class BridgeNode::Impl {
         for (const auto& entry : owned_images) {
           orbvi_sdk::RectifiedLeftImageView view;
           view.pair_id = entry.first;
-          view.image = entry.second.view();
+          view.image = entry.second->view();
           image_views.push_back(view);
         }
         auto color_result = orbvi_sdk::GeneratePointCloud(
@@ -972,13 +1081,25 @@ class BridgeNode::Impl {
   }
 
   void PublishDisparity(const orbvi_sdk::FrameView& frame) {
-    sensor_msgs::Image message;
-    if (!MakeDisparityImage(frame, &message)) {
-      ROS_WARN_THROTTLE(5.0, "Failed to parse Host SDK disparity payload");
-      return;
+    if (depth_calibration_) {
+      const auto outputs = MakeSplitDisparityImages(frame, *depth_calibration_);
+      if (!outputs.empty()) {
+        for (const auto& output : outputs) {
+          Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, output.topic_suffix))
+              .publish(output.message);
+        }
+      } else {
+        ROS_WARN_THROTTLE(5.0, "Failed to split Host SDK disparity payload");
+      }
+    } else {
+      sensor_msgs::Image message;
+      if (!MakeDisparityImage(frame, &message)) {
+        ROS_WARN_THROTTLE(5.0, "Failed to parse Host SDK disparity payload");
+        return;
+      }
+      Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "disparity"))
+          .publish(message);
     }
-    Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "disparity"))
-        .publish(message);
     PublishDepth(frame);
   }
 
@@ -996,46 +1117,85 @@ class BridgeNode::Impl {
       return;
     }
     const orbvi_sdk::DepthMap& depth = depth_result.value();
-    sensor_msgs::Image message;
-    if (!MakeDepthImage(depth.view(), &message)) {
-      ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth image to ROS Image");
+    const auto outputs = MakeSplitDepthImages(depth.view(), *depth_calibration_);
+    if (outputs.empty()) {
+      ROS_WARN_THROTTLE(5.0, "Failed to split ORBVI depth image");
+    } else {
+      for (const auto& output : outputs) {
+        Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, output.topic_suffix))
+            .publish(output.message);
+      }
+    }
+    EnqueueDepthDerivedFrame(frame);
+    PublishDepthVisualization(depth.view(), frame);
+  }
+
+  void PublishDepthPanorama(const orbvi_sdk::FrameView& frame) {
+    if (!config_.publish_depth_panorama || !depth_calibration_ || !depth_panorama_lookup_) {
       return;
     }
-    Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "depth")).publish(message);
-    PublishDepthVisualization(depth.view(), frame);
+    sensor_msgs::Image message;
+    std::string error;
+    if (!MakeDepthPanoramaImage(
+            frame,
+            *depth_calibration_,
+            *depth_panorama_lookup_,
+            &message,
+            &error)) {
+      ROS_WARN_THROTTLE(
+          5.0,
+          "Failed to generate ORBVI depth panorama Image: %s",
+          error.c_str());
+      return;
+    }
+    Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "depth/panorama"))
+        .publish(message);
+    sensor_msgs::Image viz;
+    if (MakeDepthPanoramaVisualizationImage(message, &viz)) {
+      Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "depth/panorama/viz"))
+          .publish(viz);
+    } else {
+      ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth panorama to visualization Image");
+    }
+  }
+
+  void PublishDepthPointCloud(const orbvi_sdk::FrameView& source_disparity) {
+    if (!config_.publish_depth_pointcloud || !depth_calibration_) {
+      return;
+    }
+    auto cloud_result = GenerateDepthPointCloud(source_disparity);
+    if (!cloud_result) {
+      ROS_WARN_THROTTLE(
+          5.0,
+          "Failed to generate ORBVI SDK depth PointCloud: %s",
+          cloud_result.error().message.c_str());
+      return;
+    }
+    sensor_msgs::PointCloud2 message;
+    if (MakePointCloudMessage(cloud_result.value(), &message)) {
+      Publisher<sensor_msgs::PointCloud2>(JoinTopic(config_.topic_prefix, "depth/points"))
+          .publish(message);
+    } else {
+      ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth image to visualization PointCloud2");
+    }
   }
 
   void PublishDepthVisualization(
       const orbvi_sdk::DepthMapView& depth,
       const orbvi_sdk::FrameView& source_disparity) {
     if (config_.publish_depth_viz) {
-      sensor_msgs::Image message;
-      if (MakeDepthVisualizationImage(
-              depth,
-              source_disparity,
-              config_.depth_visualization_options,
-              &message)) {
-        Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "depth/viz"))
-            .publish(message);
-      } else {
-        ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth image to visualization Image");
-      }
-    }
-    if (config_.publish_depth_pointcloud && depth_calibration_) {
-      auto cloud_result = GenerateDepthPointCloud(source_disparity);
-      if (!cloud_result) {
-        ROS_WARN_THROTTLE(
-            5.0,
-            "Failed to generate ORBVI SDK depth PointCloud: %s",
-            cloud_result.error().message.c_str());
+      const auto outputs = MakeSplitDepthVisualizationImages(
+          depth,
+          source_disparity,
+          config_.depth_visualization_options,
+          *depth_calibration_);
+      if (outputs.empty()) {
+        ROS_WARN_THROTTLE(5.0, "Failed to split ORBVI depth visualization Image");
         return;
       }
-      sensor_msgs::PointCloud2 message;
-      if (MakePointCloudMessage(cloud_result.value(), &message)) {
-        Publisher<sensor_msgs::PointCloud2>(JoinTopic(config_.topic_prefix, "depth/points"))
-            .publish(message);
-      } else {
-        ROS_WARN_THROTTLE(5.0, "Failed to convert ORBVI depth image to visualization PointCloud2");
+      for (const auto& output : outputs) {
+        Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, output.topic_suffix))
+            .publish(output.message);
       }
     }
   }
@@ -1061,10 +1221,20 @@ class BridgeNode::Impl {
   BridgeConfig config_;
   std::unique_ptr<orbvi_sdk::Client> client_;
   std::optional<orbvi_sdk::DepthCalibration> depth_calibration_;
+  std::optional<DepthPanoramaLookup> depth_panorama_lookup_;
   std::optional<orbvi_sdk::PanoramaSubscriptionHandle> panorama_subscription_;
   std::vector<orbvi_sdk::SubscriptionHandle> subscriptions_;
   mutable std::mutex rectified_left_images_mutex_;
-  std::map<std::uint32_t, std::deque<orbvi_sdk::OwnedDecodedImage>> rectified_left_images_;
+  std::map<
+      std::uint32_t,
+      std::deque<std::shared_ptr<const orbvi_sdk::OwnedDecodedImage>>>
+      rectified_left_images_;
+  std::mutex depth_derived_mutex_;
+  std::condition_variable depth_derived_cv_;
+  orbvi_sdk::OwnedFrame depth_derived_frame_;
+  std::thread depth_derived_worker_;
+  bool depth_derived_stop_ = false;
+  bool depth_derived_pending_ = false;
   std::mutex publishers_mutex_;
   std::map<std::string, ros::Publisher> publishers_;
 };

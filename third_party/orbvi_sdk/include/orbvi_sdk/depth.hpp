@@ -88,6 +88,55 @@ struct DepthMap {
   DepthMapView view() const;
 };
 
+struct DepthPanoramaOptions {
+  // Equirectangular full canvas size. The published depth panorama can crop
+  // rows from the top/bottom while preserving the full-canvas angular mapping.
+  std::uint32_t width = 2048;
+  std::uint32_t height = 1024;
+  std::uint32_t crop_top = 280;
+  std::uint32_t crop_bottom = 280;
+  double min_disparity_px = 0.5;
+  double min_range_m = 0.1;
+  double max_range_m = 20.0;
+  bool include_segment_id = false;
+  std::string frame_id = "panorama";
+};
+
+struct DepthPanoramaSample {
+  std::int32_t tile_index = -1;
+  std::uint32_t x = 0;
+  std::uint32_t y = 0;
+  float range_scale = 0.0f;
+};
+
+struct DepthPanoramaLookup {
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::uint32_t full_height = 0;
+  std::uint32_t crop_top = 0;
+  std::uint32_t crop_bottom = 0;
+  std::string calibration_version;
+  std::string calibration_hash;
+  std::vector<DepthPanoramaSample> samples;
+  MetadataMap metadata;
+};
+
+struct DepthPanorama {
+  DepthPixelFormat pixel_format = DepthPixelFormat::Float32Meters;
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::uint32_t stride = 0;
+  std::uint64_t timestamp_ns = 0;
+  std::string frame_id;
+  std::string calibration_version;
+  std::string calibration_hash;
+  std::vector<std::uint8_t> data;
+  std::vector<std::uint8_t> segment_id;
+  MetadataMap metadata;
+
+  DepthMapView view() const;
+};
+
 enum class PointCloudFrame {
   TileOptical,
   CalibrationWorld,
@@ -174,6 +223,27 @@ Result<DepthMap> GenerateDepthMap(
     const OwnedFrame& disparity_frame,
     const DepthCalibration& calibration,
     const DepthGenerationOptions& options = {});
+Result<DepthPanoramaLookup> BuildDepthPanoramaLookup(
+    const DepthCalibration& calibration,
+    const DepthPanoramaOptions& options = {});
+Result<DepthPanorama> GenerateDepthPanorama(
+    const FrameView& disparity_frame,
+    const DepthCalibration& calibration,
+    const DepthPanoramaLookup& lookup,
+    const DepthPanoramaOptions& options = {});
+Result<DepthPanorama> GenerateDepthPanorama(
+    const OwnedFrame& disparity_frame,
+    const DepthCalibration& calibration,
+    const DepthPanoramaLookup& lookup,
+    const DepthPanoramaOptions& options = {});
+Result<DepthPanorama> GenerateDepthPanorama(
+    const FrameView& disparity_frame,
+    const DepthCalibration& calibration,
+    const DepthPanoramaOptions& options = {});
+Result<DepthPanorama> GenerateDepthPanorama(
+    const OwnedFrame& disparity_frame,
+    const DepthCalibration& calibration,
+    const DepthPanoramaOptions& options = {});
 Result<PointCloud> GeneratePointCloud(
     const FrameView& disparity_frame,
     const DepthCalibration& calibration,

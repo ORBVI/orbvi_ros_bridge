@@ -36,7 +36,7 @@ PANORAMA_ARGUMENT_DEFAULTS = {
     "pano_dp_seam_band_px": "96",
     "pano_dp_seam_smoothness": "8.0",
     "pano_seam_avoidance_penalty": "220.0",
-    "pano_blend": "multiband",
+    "pano_blend": "feather",
     "pano_photometric_align": "true",
     "pano_seam_ghost_suppression": "false",
     "pano_seam_ghost_threshold": "80.0",

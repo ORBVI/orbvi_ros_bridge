@@ -1,9 +1,11 @@
 <launch>
   <!-- Visual entry: cameras, device IMU, disparity, depth and VIO. -->
   <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
+  <arg name="publish_lidar_pcl" default="false" doc="Publish Livox CustomMsg as sensor_msgs/PointCloud2 on topic_prefix/lidar/points"/>
 
   <node pkg="orbvi_ros_bridge" type="orbvi_ros_bridge_node" name="orbvi_ros_bridge" output="screen">
     <param name="host" value="$(arg host)"/>
+    <param name="publish_lidar_pcl" value="$(arg publish_lidar_pcl)"/>
     <param name="streams" value="raw,rectified,imu,disparity,depth,vio"/>
   </node>
 </launch>

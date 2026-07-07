@@ -68,6 +68,7 @@ struct BridgeConfig {
   bool publish_depth_panorama = true;
   bool colorize_depth_pointcloud = true;
   bool publish_panorama = false;
+  bool publish_lidar_pcl = false;
   bool sensor_data_best_effort = true;
   bool log_delivery_stats = false;
   orbvi_sdk::DepthGenerationOptions depth_options;
@@ -553,6 +554,10 @@ class BridgeNode::Impl {
       config.streams.push_back(orbvi_sdk::StreamId::Disparity);
       ROS_INFO("Depth output requires disparity frames; subscribing disparity_stream");
     }
+    private_node_.param<bool>(
+        "publish_lidar_pcl",
+        config.publish_lidar_pcl,
+        config.publish_lidar_pcl);
     return config;
   }
 
@@ -1322,6 +1327,16 @@ class BridgeNode::Impl {
     if (!MakeLivoxCustomMessage(frame, &message)) {
       ROS_WARN_THROTTLE(5.0, "Failed to parse Host SDK Livox payload");
       return;
+    }
+    if (config_.publish_lidar_pcl) {
+      sensor_msgs::msg::PointCloud2 pcl_message;
+      if (MakeLivoxPointCloud2(message, &pcl_message)) {
+        PublishMessage(
+            JoinTopic(config_.topic_prefix, "lidar/points"),
+            std::move(pcl_message));
+      } else {
+        ROS_WARN_THROTTLE(5.0, "Failed to convert Host SDK Livox payload to PointCloud2");
+      }
     }
     PublishMessage(JoinTopic(config_.topic_prefix, "lidar/custom"), std::move(message));
   }

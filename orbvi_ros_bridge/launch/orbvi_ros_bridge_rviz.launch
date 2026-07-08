@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find orbvi_ros_bridge)/visuallize_config/rviz-config.rviz"
+        required="true" />
+</launch>

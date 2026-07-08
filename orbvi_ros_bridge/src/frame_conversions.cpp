@@ -17,6 +17,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <std_msgs/Header.h>
+#include <sensor_msgs/PointField.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 
 namespace orbvi_ros_bridge {
@@ -1734,6 +1735,47 @@ bool MakeLivoxCustomMessage(
         !ReadPod(frame.payload_data, frame.payload_size, &offset, &point.line)) {
       return false;
     }
+  }
+  return true;
+}
+
+bool MakeLivoxPointCloud2(
+    const livox_ros_driver2::CustomMsg& msg,
+    sensor_msgs::PointCloud2* out) {
+  if (out == nullptr) {
+    return false;
+  }
+
+  out->header = msg.header;
+  out->height = 1;
+  out->width = static_cast<std::uint32_t>(
+      std::min<std::size_t>(msg.points.size(), std::numeric_limits<std::uint32_t>::max()));
+  out->is_bigendian = false;
+  out->is_dense = false;
+  sensor_msgs::PointCloud2Modifier modifier(*out);
+  modifier.setPointCloud2Fields(
+      4,
+      "x", 1, sensor_msgs::PointField::FLOAT32,
+      "y", 1, sensor_msgs::PointField::FLOAT32,
+      "z", 1, sensor_msgs::PointField::FLOAT32,
+      "intensity", 1, sensor_msgs::PointField::FLOAT32);
+  modifier.resize(out->width);
+
+  sensor_msgs::PointCloud2Iterator<float> iter_x(*out, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(*out, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(*out, "z");
+  sensor_msgs::PointCloud2Iterator<float> iter_intensity(*out, "intensity");
+
+  for (std::uint32_t i = 0; i < out->width; ++i) {
+    const auto& point = msg.points[i];
+    *iter_x = point.x;
+    *iter_y = point.y;
+    *iter_z = point.z;
+    *iter_intensity = static_cast<float>(point.reflectivity);
+    ++iter_x;
+    ++iter_y;
+    ++iter_z;
+    ++iter_intensity;
   }
   return true;
 }

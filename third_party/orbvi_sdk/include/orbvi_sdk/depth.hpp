@@ -137,6 +137,41 @@ struct DepthPanorama {
   DepthMapView view() const;
 };
 
+// Dense spherical range geometry expressed in the calibration reference frame.
+// Unlike DepthPanorama, this product is built by reconstructing rectified 3-D
+// points with each stereo pair's full pose and z-buffering them around a common
+// rig origin. It is intended for parallax-aware RGB seam reprojection.
+struct RigDepthPanoramaOptions {
+  std::uint32_t width = 2048;
+  std::uint32_t height = 1024;
+  std::uint32_t crop_top = 200;
+  std::uint32_t crop_bottom = 200;
+  double min_disparity_px = 0.5;
+  double min_range_m = 0.2;
+  double max_range_m = 20.0;
+  double max_disparity_jump_px = 2.0;
+  double depth_edge_jump_m = 0.25;
+  std::uint32_t edge_dilation_px = 2;
+  std::array<double, 3> origin_reference_m = {0.0, 0.0, 0.0};
+};
+
+struct RigDepthPanorama {
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::uint32_t full_height = 0;
+  std::uint32_t crop_top = 0;
+  std::uint32_t crop_bottom = 0;
+  std::uint64_t timestamp_ns = 0;
+  std::string frame_id;
+  std::string calibration_version;
+  std::string calibration_hash;
+  std::array<double, 3> origin_reference_m = {0.0, 0.0, 0.0};
+  std::vector<float> range_m;
+  std::vector<std::uint8_t> confidence;
+  std::vector<std::uint8_t> depth_edge;
+  MetadataMap metadata;
+};
+
 enum class PointCloudFrame {
   TileOptical,
   CalibrationWorld,
@@ -244,6 +279,24 @@ Result<DepthPanorama> GenerateDepthPanorama(
     const OwnedFrame& disparity_frame,
     const DepthCalibration& calibration,
     const DepthPanoramaOptions& options = {});
+Result<RigDepthPanorama> GenerateRigDepthPanorama(
+    const FrameView& disparity_frame,
+    const DepthCalibration& calibration,
+    const RigDepthPanoramaOptions& options = {});
+Result<RigDepthPanorama> GenerateRigDepthPanorama(
+    const OwnedFrame& disparity_frame,
+    const DepthCalibration& calibration,
+    const RigDepthPanoramaOptions& options = {});
+Result<void> GenerateRigDepthPanorama(
+    const FrameView& disparity_frame,
+    const DepthCalibration& calibration,
+    const RigDepthPanoramaOptions& options,
+    RigDepthPanorama* output);
+Result<void> GenerateRigDepthPanorama(
+    const OwnedFrame& disparity_frame,
+    const DepthCalibration& calibration,
+    const RigDepthPanoramaOptions& options,
+    RigDepthPanorama* output);
 Result<PointCloud> GeneratePointCloud(
     const FrameView& disparity_frame,
     const DepthCalibration& calibration,

@@ -1,0 +1,44 @@
+# 四目鱼眼 RGB 全景：固定接缝 ROI MultiBand + 深度辅助
+pano_profile: "baseline"
+
+# 完整等距柱状投影画布，实际输出为 2048x624
+pano_width: 2048
+pano_height: 1024
+pano_crop_top: 200
+pano_crop_bottom: 200
+
+pano_fov_half_deg: 95.0
+pano_stitching_radius_m: 2.0
+
+# 深度辅助目前只支持 fixed seam + MultiBand ROI
+pano_blend: "multiband"
+pano_seam_mode: "fixed"
+pano_seam_blend_px: 16
+pano_multiband_levels: 4
+
+pano_photometric_align: true
+
+# 必须关闭，否则会退回不支持深度辅助的后端
+pano_seam_ghost_suppression: false
+pano_seam_ghost_threshold: 80.0
+
+# 动态接缝参数暂时保留，但 fixed 模式下不使用
+pano_dp_seam_band_px: 96
+pano_dp_seam_smoothness: 8.0
+pano_seam_avoidance_penalty: 500.0
+
+# 深度辅助
+pano_depth_assist: true
+
+# false：深度无效时仍输出 RGB 全景
+# 调试时可临时设为 true，用于确认是否真正获得同步深度
+pano_depth_required: false
+
+pano_depth_min_range_m: 0.2
+pano_depth_max_warp_range_m: 8.0
+
+# RGB 与 disparity 最大时间差
+pano_max_depth_timestamp_delta_ms: 10
+
+# 0 表示 SDK 自动选择线程数
+pano_max_stitch_threads: 0

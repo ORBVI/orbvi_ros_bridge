@@ -20,6 +20,12 @@ Linux architecture. Set `ORBVI_HOST_SDK_ROOT`,
 `ORBVI_HOST_SDK_INCLUDE_DIR`/`ORBVI_HOST_SDK_LIBRARY`, or
 `ORBVI_HOST_SDK_SOURCE_DIR` when developing against a different SDK build.
 
+Public C++ option/result structures are part of the Host SDK ABI. Headers and
+libraries must therefore be refreshed as one bundle. Never copy a newer
+`liborbvi_sdk.so` over a Bridge binary compiled with older headers; clean and
+rebuild the Bridge after every bundle refresh. The host-SDK link test resolves
+the rig-depth panorama symbol to reject a stale binary bundle.
+
 `libturbojpeg` is statically linked into the bundled `liborbvi_sdk.so`, so ROS
 bridge users do not need to install TurboJPEG separately.
 

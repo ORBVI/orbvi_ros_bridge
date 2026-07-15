@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <string>
 
 #include "orbvi_sdk/panorama.hpp"
@@ -63,6 +64,23 @@ inline bool ParsePanoramaBlendMode(
     return true;
   }
   return false;
+}
+
+inline std::uint32_t PanoramaOutputHeight(
+    const orbvi_sdk::PanoramaStitchOptions& options) {
+  const std::uint64_t crop =
+      static_cast<std::uint64_t>(options.crop_top) + options.crop_bottom;
+  return crop < options.height
+             ? options.height - static_cast<std::uint32_t>(crop)
+             : 0u;
+}
+
+inline bool SupportsDepthAssistedSeamRoi(
+    const orbvi_sdk::PanoramaStitchOptions& options) {
+  return options.blend_mode == orbvi_sdk::PanoramaBlendMode::MultiBand &&
+         options.seam_mode == orbvi_sdk::PanoramaSeamMode::Fixed &&
+         options.seam_blend_px > 0u &&
+         !options.seam_ghost_suppression;
 }
 
 }  // namespace orbvi_ros_bridge

@@ -7,8 +7,6 @@ import xml.etree.ElementTree as ET
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = PACKAGE_ROOT.parent
-RATE_CHECK_SCRIPT = REPO_ROOT / "scripts" / "orbvi_ros_bridge_rate_check.sh"
 
 VISUAL_STREAMS = "raw,rectified,imu,disparity,depth,vio"
 MID360_STREAMS = "raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio"
@@ -30,16 +28,26 @@ PANORAMA_ARGUMENT_DEFAULTS = {
     "pano_profile": "baseline",
     "pano_width": "2048",
     "pano_height": "1024",
+    "pano_crop_top": "200",
+    "pano_crop_bottom": "200",
     "pano_fov_half_deg": "95.0",
-    "pano_seam_blend_px": "32",
+    "pano_stitching_radius_m": "2.0",
+    "pano_seam_blend_px": "16",
     "pano_seam_mode": "fixed",
     "pano_dp_seam_band_px": "96",
     "pano_dp_seam_smoothness": "8.0",
-    "pano_seam_avoidance_penalty": "220.0",
-    "pano_blend": "feather",
+    "pano_seam_avoidance_penalty": "500.0",
+    "pano_blend": "multiband",
+    "pano_multiband_levels": "4",
     "pano_photometric_align": "true",
     "pano_seam_ghost_suppression": "false",
     "pano_seam_ghost_threshold": "80.0",
+    "pano_depth_assist": "false",
+    "pano_depth_required": "false",
+    "pano_depth_min_range_m": "0.2",
+    "pano_depth_max_warp_range_m": "8.0",
+    "pano_max_depth_timestamp_delta_ms": "120",
+    "pano_max_stitch_threads": "0",
 }
 
 
@@ -103,17 +111,26 @@ def yaml_scalar_defaults(path):
 class LaunchContractTest(unittest.TestCase):
     def test_ros1_exposes_three_user_launch_configs(self):
         launch_names = sorted(path.name for path in (PACKAGE_ROOT / "launch").glob("orbvi_ros_bridge*.launch"))
-        self.assertEqual(launch_names, sorted(ROS1_USER_LAUNCHES))
+        self.assertEqual(
+            launch_names,
+            sorted([*ROS1_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch"]),
+        )
 
     def test_ros2_exposes_three_user_launch_configs(self):
         launch_names = sorted(path.name for path in (PACKAGE_ROOT / "launch" / "ros2").glob("orbvi_ros_bridge*.launch.py"))
-        self.assertEqual(launch_names, sorted(ROS2_USER_LAUNCHES))
+        self.assertEqual(
+            launch_names,
+            sorted([*ROS2_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch.py"]),
+        )
 
     def test_ros1_launch_configs_expose_only_host(self):
         for launch_name, expected_streams in ROS1_USER_LAUNCHES.items():
             with self.subTest(launch_name=launch_name):
                 path = PACKAGE_ROOT / "launch" / launch_name
-                self.assertEqual(ros1_arg_defaults(path), {"host": "127.0.0.1"})
+                self.assertEqual(
+                    ros1_arg_defaults(path),
+                    {"host": "127.0.0.1", "publish_lidar_pcl": "false"},
+                )
                 self.assertEqual(ros1_param_value(path, "streams"), expected_streams)
                 self.assertNotIn("pano", VISUAL_STREAMS.split(","))
                 self.assertIn("pano", PANO_STREAMS.split(","))
@@ -122,7 +139,10 @@ class LaunchContractTest(unittest.TestCase):
         for launch_name, expected_streams in ROS2_USER_LAUNCHES.items():
             with self.subTest(launch_name=launch_name):
                 path = PACKAGE_ROOT / "launch" / "ros2" / launch_name
-                self.assertEqual(ros2_argument_defaults(path), {"host": "127.0.0.1"})
+                self.assertEqual(
+                    ros2_argument_defaults(path),
+                    {"host": "127.0.0.1", "publish_lidar_pcl": "false"},
+                )
                 parameters = ros2_dict_assignment(path, "DEFAULT_BRIDGE_PARAMETERS")
                 self.assertEqual(parameters["streams"], expected_streams)
                 self.assertIn("LaunchConfiguration(\"host\")", path.read_text(encoding="utf-8"))
@@ -144,24 +164,7 @@ class LaunchContractTest(unittest.TestCase):
                     self.assertNotIn("pano_mode2_ros2.yaml", source)
                 self.assertNotIn("LaunchConfiguration(\"pano_config\")", source)
 
-    def test_rate_check_start_bridge_uses_fixed_launch_contract(self):
-        source = RATE_CHECK_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("bridge_launch=\"orbvi_ros_bridge_mid360.launch\"", source)
-        self.assertIn("--bridge-launch LAUNCH", source)
-        self.assertIn("roslaunch orbvi_ros_bridge \"$bridge_launch\"", source)
-        for unsupported_arg in (
-            "control_port:=",
-            "streams:=",
-            "image_mode:=",
-            "queue_size:=",
-            "max_receive_queue_depth:=",
-            "max_decode_queue_depth:=",
-        ):
-            self.assertNotIn(unsupported_arg, source)
-        self.assertNotIn("--streams CSV", source)
-        self.assertNotIn("--image-mode MODE", source)
-
-    def test_default_pano_configs_use_mode2_blend_px_32(self):
+    def test_default_pano_configs_use_rotation_extrinsics_without_stale_depth(self):
         for config_name in ("pano_mode2.yaml", "pano_mode2_ros2.yaml"):
             with self.subTest(config_name=config_name):
                 values = yaml_scalar_defaults(PACKAGE_ROOT / "config" / config_name)

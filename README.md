@@ -42,6 +42,8 @@ ROS1 and ROS2 use the same topic names. ROS2 message packages use the matching
 | `/orbvi/disparity` | `sensor_msgs/Image` | Disparity image |
 | `/orbvi/depth` | `sensor_msgs/Image` | Generated depth image |
 | `/orbvi/depth/viz` | `sensor_msgs/Image` | Depth visualization image |
+| `/orbvi/depth/panorama` | `sensor_msgs/Image` | `32FC1` spherical range derived from four disparity tiles |
+| `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | Depth-panorama visualization |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | Depth-derived point cloud |
 | `/orbvi/vio/odometry` | `nav_msgs/Odometry` | Optimized VIO pose |
 | `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU-propagated VIO pose |
@@ -135,7 +137,24 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 ```
 
 Public topic names are fixed under `/orbvi`. The panorama launch uses the
-bundled `config/pano_mode2.yaml` / `config/pano_mode2_ros2.yaml` defaults.
+bundled `config/pano_mode2.yaml` / `config/pano_mode2_ros2.yaml` defaults. It
+projects a 2048x1024 angular canvas, crops 200 rows at the top and bottom, and
+publishes 2048x624 fixed-seam, four-level MultiBand output using the calibrated
+fisheye rotations and translations with a configurable 2.0 m finite stitching
+radius. The physical mapping is fixed as `front=3`, `right=2`,
+`rear=4`, `left=5`. Depth assistance is disabled by default because disparity
+from the stereo network trails the raw fisheye capture; using stale geometry on
+moving objects would increase ghosting. A throttled log reports the effective
+camera mapping and whether the rotation extrinsics are applied.
+
+The optional depth path retains the latest four `RigDepthPanorama` products and
+selects the closest one without waiting. Enable it only after RGB/disparity
+capture timestamps have been aligned and verified.
+
+Depth assistance requires the matching Host SDK ABI. Always refresh both
+`third_party/orbvi_sdk/include/orbvi_sdk` and the architecture-specific
+`liborbvi_sdk`, then clean and rebuild the Bridge. Replacing only the `.so` is
+not supported.
 
 ROS2 launch files set the bundled Fast DDS shared-memory profile for the bridge
 process. Start standalone ROS2 tools with the same profile when they need to

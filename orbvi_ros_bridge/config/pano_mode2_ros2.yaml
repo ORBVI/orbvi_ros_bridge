@@ -1,17 +1,33 @@
-# Host SDK panorama reference config used by ROS2 launch files.
+# Four-fisheye RGB panorama: fixed seam-ROI MultiBand with calibrated rotations.
 # These parameters are used only when streams includes pano.
 /**:
   ros__parameters:
     pano_profile: "baseline"
     pano_width: 2048
     pano_height: 1024
+    pano_crop_top: 200
+    pano_crop_bottom: 200
     pano_fov_half_deg: 95.0
-    pano_seam_blend_px: 32
+    # Finite-radius projection uses calibrated camera translations to reduce
+    # parallax near the selected indoor working distance. Set 0 for infinity.
+    pano_stitching_radius_m: 2.0
+    pano_seam_blend_px: 16
     pano_seam_mode: "fixed"
     pano_dp_seam_band_px: 96
     pano_dp_seam_smoothness: 8.0
-    pano_seam_avoidance_penalty: 220.0
-    pano_blend: "feather"
+    pano_seam_avoidance_penalty: 500.0
+    pano_blend: "multiband"
+    pano_multiband_levels: 4
     pano_photometric_align: true
+    # Keep ghost suppression off for the fixed seam-ROI MultiBand backend.
     pano_seam_ghost_suppression: false
     pano_seam_ghost_threshold: 80.0
+    # Disparity is delayed by the stereo network. Keep asynchronous depth assistance
+    # disabled until RGB/disparity capture timestamps can be aligned reliably.
+    pano_depth_assist: false
+    pano_depth_required: false
+    pano_depth_min_range_m: 0.2
+    pano_depth_max_warp_range_m: 8.0
+    pano_max_depth_timestamp_delta_ms: 120
+    # 0 lets the Host SDK choose the worker count.
+    pano_max_stitch_threads: 0

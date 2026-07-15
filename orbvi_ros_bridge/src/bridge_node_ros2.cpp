@@ -1,13 +1,16 @@
 #include "bridge_node_ros2.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -342,6 +345,10 @@ class BridgeNode::Impl {
 
   bool Start() {
     config_ = LoadConfig();
+    {
+      std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
+      panorama_depth_frames_.clear();
+    }
     orbvi_sdk::ClientOptions options;
     options.host = config_.host;
     options.control_port = config_.control_port;
@@ -383,6 +390,10 @@ class BridgeNode::Impl {
     if (panorama_subscription_) {
       panorama_subscription_->stop();
       panorama_subscription_.reset();
+    }
+    {
+      std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
+      panorama_depth_frames_.clear();
     }
     for (auto& handle : subscriptions_) {
       handle.stop();
@@ -558,6 +569,11 @@ class BridgeNode::Impl {
         "publish_lidar_pcl",
         config.publish_lidar_pcl,
         config.publish_lidar_pcl);
+    if (config.publish_panorama && config.panorama_options.stitch.depth_assist &&
+        !HasStream(config.streams, orbvi_sdk::StreamId::Disparity)) {
+      config.streams.push_back(orbvi_sdk::StreamId::Disparity);
+      ROS_INFO("Panorama depth assist requires disparity frames; subscribing disparity_stream");
+    }
     return config;
   }
 
@@ -644,6 +660,27 @@ class BridgeNode::Impl {
     config->panorama_options.stitch.height =
         pano_height <= 0 ? 1024u : static_cast<std::uint32_t>(pano_height);
 
+    int crop_top = static_cast<int>(config->panorama_options.stitch.crop_top);
+    private_node_.param<int>("pano_crop_top", crop_top, crop_top);
+    private_node_.param<int>("panorama_crop_top", crop_top, crop_top);
+    config->panorama_options.stitch.crop_top =
+        crop_top < 0 ? 0u : static_cast<std::uint32_t>(crop_top);
+
+    int crop_bottom = static_cast<int>(config->panorama_options.stitch.crop_bottom);
+    private_node_.param<int>("pano_crop_bottom", crop_bottom, crop_bottom);
+    private_node_.param<int>("panorama_crop_bottom", crop_bottom, crop_bottom);
+    config->panorama_options.stitch.crop_bottom =
+        crop_bottom < 0 ? 0u : static_cast<std::uint32_t>(crop_bottom);
+    if (PanoramaOutputHeight(config->panorama_options.stitch) == 0u) {
+      ROS_WARN_STREAM(
+          "Invalid panorama crop " << config->panorama_options.stitch.crop_top
+          << "+" << config->panorama_options.stitch.crop_bottom
+          << " for full height " << config->panorama_options.stitch.height
+          << "; using uncropped output");
+      config->panorama_options.stitch.crop_top = 0u;
+      config->panorama_options.stitch.crop_bottom = 0u;
+    }
+
     private_node_.param<double>(
         "pano_fov_half_deg",
         config->panorama_options.stitch.fov_half_deg,
@@ -652,6 +689,20 @@ class BridgeNode::Impl {
         "panorama_fov_half_deg",
         config->panorama_options.stitch.fov_half_deg,
         config->panorama_options.stitch.fov_half_deg);
+
+    private_node_.param<double>(
+        "pano_stitching_radius_m",
+        config->panorama_options.stitch.stitching_radius_m,
+        config->panorama_options.stitch.stitching_radius_m);
+    private_node_.param<double>(
+        "panorama_stitching_radius_m",
+        config->panorama_options.stitch.stitching_radius_m,
+        config->panorama_options.stitch.stitching_radius_m);
+    if (!std::isfinite(config->panorama_options.stitch.stitching_radius_m) ||
+        config->panorama_options.stitch.stitching_radius_m < 0.0) {
+      ROS_WARN("Invalid panorama stitching radius; using 2.0 m");
+      config->panorama_options.stitch.stitching_radius_m = 2.0;
+    }
 
     int seam_blend_px = static_cast<int>(config->panorama_options.stitch.seam_blend_px);
     private_node_.param<int>("pano_seam_blend_px", seam_blend_px, seam_blend_px);
@@ -699,6 +750,14 @@ class BridgeNode::Impl {
       config->panorama_options.stitch.blend_mode = orbvi_sdk::PanoramaBlendMode::MultiBand;
     }
 
+    int multiband_levels =
+        static_cast<int>(config->panorama_options.stitch.multiband_levels);
+    private_node_.param<int>("pano_multiband_levels", multiband_levels, multiband_levels);
+    private_node_.param<int>(
+        "panorama_multiband_levels", multiband_levels, multiband_levels);
+    config->panorama_options.stitch.multiband_levels =
+        static_cast<std::uint32_t>(std::clamp(multiband_levels, 0, 8));
+
     private_node_.param<bool>(
         "pano_photometric_align",
         config->panorama_options.stitch.photometric_align,
@@ -724,6 +783,78 @@ class BridgeNode::Impl {
         "panorama_seam_ghost_threshold",
         config->panorama_options.stitch.seam_ghost_threshold,
         config->panorama_options.stitch.seam_ghost_threshold);
+
+    private_node_.param<bool>(
+        "pano_depth_assist",
+        config->panorama_options.stitch.depth_assist,
+        config->panorama_options.stitch.depth_assist);
+    private_node_.param<bool>(
+        "panorama_depth_assist",
+        config->panorama_options.stitch.depth_assist,
+        config->panorama_options.stitch.depth_assist);
+    private_node_.param<bool>(
+        "pano_depth_required",
+        config->panorama_options.stitch.depth_required,
+        config->panorama_options.stitch.depth_required);
+    private_node_.param<bool>(
+        "panorama_depth_required",
+        config->panorama_options.stitch.depth_required,
+        config->panorama_options.stitch.depth_required);
+    if (config->panorama_options.stitch.depth_required &&
+        !config->panorama_options.stitch.depth_assist) {
+      ROS_WARN("pano_depth_required=true implies pano_depth_assist=true");
+      config->panorama_options.stitch.depth_assist = true;
+    }
+
+    private_node_.param<double>(
+        "pano_depth_min_range_m",
+        config->panorama_options.stitch.depth_min_range_m,
+        config->panorama_options.stitch.depth_min_range_m);
+    private_node_.param<double>(
+        "panorama_depth_min_range_m",
+        config->panorama_options.stitch.depth_min_range_m,
+        config->panorama_options.stitch.depth_min_range_m);
+    if (config->panorama_options.stitch.depth_min_range_m <= 0.0) {
+      config->panorama_options.stitch.depth_min_range_m = 0.2;
+    }
+    private_node_.param<double>(
+        "pano_depth_max_warp_range_m",
+        config->panorama_options.stitch.depth_max_warp_range_m,
+        config->panorama_options.stitch.depth_max_warp_range_m);
+    private_node_.param<double>(
+        "panorama_depth_max_warp_range_m",
+        config->panorama_options.stitch.depth_max_warp_range_m,
+        config->panorama_options.stitch.depth_max_warp_range_m);
+    if (config->panorama_options.stitch.depth_max_warp_range_m <=
+        config->panorama_options.stitch.depth_min_range_m) {
+      ROS_WARN("Invalid panorama depth warp range; using max range 8.0 m");
+      config->panorama_options.stitch.depth_max_warp_range_m = 8.0;
+    }
+
+    int max_depth_delta_ms = static_cast<int>(
+        config->panorama_options.max_depth_timestamp_delta_ns / 1'000'000ULL);
+    private_node_.param<int>(
+        "pano_max_depth_timestamp_delta_ms", max_depth_delta_ms, max_depth_delta_ms);
+    private_node_.param<int>(
+        "panorama_max_depth_timestamp_delta_ms", max_depth_delta_ms, max_depth_delta_ms);
+    config->panorama_options.max_depth_timestamp_delta_ns =
+        static_cast<std::uint64_t>(std::max(0, max_depth_delta_ms)) * 1'000'000ULL;
+
+    int max_stitch_threads =
+        static_cast<int>(config->panorama_options.stitch.max_stitch_threads);
+    private_node_.param<int>(
+        "pano_max_stitch_threads", max_stitch_threads, max_stitch_threads);
+    private_node_.param<int>(
+        "panorama_max_stitch_threads", max_stitch_threads, max_stitch_threads);
+    config->panorama_options.stitch.max_stitch_threads =
+        static_cast<std::uint32_t>(std::clamp(max_stitch_threads, 0, 8));
+
+    if (config->panorama_options.stitch.depth_assist &&
+        !SupportsDepthAssistedSeamRoi(config->panorama_options.stitch)) {
+      ROS_WARN(
+          "Panorama depth assist needs fixed-seam MultiBand, seam_blend_px>0 and "
+          "seam_ghost_suppression=false; current frames will use rotation-only fallback");
+    }
   }
 
   void LoadDepthOptions(BridgeConfig* config) {
@@ -835,7 +966,7 @@ class BridgeNode::Impl {
   void PrepareDepthPublisher() {
     depth_calibration_.reset();
     depth_panorama_lookup_.reset();
-    if (!config_.publish_depth) {
+    if (!config_.publish_depth && !NeedsPanoramaDepth()) {
       return;
     }
     auto calibration_status = client_->getCalibration("");
@@ -844,6 +975,7 @@ class BridgeNode::Impl {
           "Depth output disabled: failed to fetch ORBVI calibration: "
           << calibration_status.error().message);
       config_.publish_depth = false;
+      config_.panorama_options.stitch.depth_assist = false;
       return;
     }
     auto calibration = orbvi_sdk::MakeDepthCalibration(calibration_status.value());
@@ -852,9 +984,42 @@ class BridgeNode::Impl {
           "Depth output disabled: invalid ORBVI depth calibration: "
           << calibration.error().message);
       config_.publish_depth = false;
+      config_.panorama_options.stitch.depth_assist = false;
       return;
     }
     depth_calibration_ = calibration.value();
+    if (NeedsPanoramaDepth()) {
+      auto panorama_calibration =
+          orbvi_sdk::MakePanoramaCalibration(calibration_status.value());
+      if (!panorama_calibration) {
+        ROS_ERROR_STREAM(
+            "Panorama depth assistance disabled: invalid fisheye extrinsics: "
+            << panorama_calibration.error().message);
+        config_.panorama_options.stitch.depth_assist = false;
+      } else {
+        panorama_depth_origin_reference_m_ =
+            panorama_calibration.value().panorama_origin_reference_m;
+        for (const auto& camera : panorama_calibration.value().cameras) {
+          ROS_INFO_STREAM(
+              "Panorama fisheye extrinsic role=" << camera.intrinsics.role
+              << " camera_id=" << camera.intrinsics.camera_id
+              << " translation_m=[" << camera.translation_cam_in_reference_m[0]
+              << "," << camera.translation_cam_in_reference_m[1]
+              << "," << camera.translation_cam_in_reference_m[2] << "]"
+              << " rotation=[" << camera.rotation_cam_to_reference[0]
+              << "," << camera.rotation_cam_to_reference[1]
+              << "," << camera.rotation_cam_to_reference[2]
+              << "," << camera.rotation_cam_to_reference[3]
+              << "," << camera.rotation_cam_to_reference[4]
+              << "," << camera.rotation_cam_to_reference[5]
+              << "," << camera.rotation_cam_to_reference[6]
+              << "," << camera.rotation_cam_to_reference[7]
+              << "," << camera.rotation_cam_to_reference[8] << "]"
+              << " full_extrinsics="
+              << (camera.has_full_extrinsics ? "true" : "false"));
+        }
+      }
+    }
     if (config_.publish_depth_panorama) {
       DepthPanoramaLookup lookup;
       std::string error;
@@ -887,8 +1052,9 @@ class BridgeNode::Impl {
 
   void StartDepthDerivedWorker() {
     StopDepthDerivedWorker();
-    if (!config_.publish_depth ||
-        (!config_.publish_depth_pointcloud && !config_.publish_depth_panorama)) {
+    if ((!config_.publish_depth && !NeedsPanoramaDepth()) ||
+        (!config_.publish_depth_pointcloud && !config_.publish_depth_panorama &&
+         !NeedsPanoramaDepth())) {
       return;
     }
     {
@@ -916,8 +1082,9 @@ class BridgeNode::Impl {
   }
 
   void EnqueueDepthDerivedFrame(const orbvi_sdk::FrameView& frame) {
-    if (!config_.publish_depth ||
-        (!config_.publish_depth_pointcloud && !config_.publish_depth_panorama)) {
+    if ((!config_.publish_depth && !NeedsPanoramaDepth()) ||
+        (!config_.publish_depth_pointcloud && !config_.publish_depth_panorama &&
+         !NeedsPanoramaDepth())) {
       return;
     }
     orbvi_sdk::OwnedFrame copy = CopyFrameView(frame);
@@ -947,9 +1114,60 @@ class BridgeNode::Impl {
         depth_derived_pending_ = false;
       }
       const auto view = frame.view();
+      GeneratePanoramaDepth(view);
       PublishDepthPointCloud(view);
       PublishDepthPanorama(view);
     }
+  }
+
+  bool NeedsPanoramaDepth() const {
+    return config_.publish_panorama && config_.panorama_options.stitch.depth_assist;
+  }
+
+  void GeneratePanoramaDepth(const orbvi_sdk::FrameView& disparity) {
+    if (!NeedsPanoramaDepth() || !depth_calibration_) {
+      return;
+    }
+    orbvi_sdk::RigDepthPanoramaOptions options;
+    options.width = config_.panorama_options.stitch.width;
+    options.height = config_.panorama_options.stitch.height;
+    options.crop_top = config_.panorama_options.stitch.crop_top;
+    options.crop_bottom = config_.panorama_options.stitch.crop_bottom;
+    options.min_range_m = config_.panorama_options.stitch.depth_min_range_m;
+    options.max_range_m = std::max(
+        config_.panorama_options.stitch.depth_max_warp_range_m, 20.0);
+    options.origin_reference_m = panorama_depth_origin_reference_m_;
+    auto generated = orbvi_sdk::GenerateRigDepthPanorama(
+        disparity, *depth_calibration_, options);
+    if (!generated) {
+      ROS_WARN_THROTTLE(
+          5.0,
+          "Failed to generate rig-centered panorama depth: %s",
+          generated.error().message.c_str());
+      return;
+    }
+    auto depth = std::make_shared<orbvi_sdk::RigDepthPanorama>(
+        std::move(generated.value()));
+    const auto log_depth = depth;
+    std::size_t cached_frames = 0;
+    {
+      std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
+      panorama_depth_frames_.push_back(std::move(depth));
+      while (panorama_depth_frames_.size() > 4u) {
+        panorama_depth_frames_.pop_front();
+      }
+      cached_frames = panorama_depth_frames_.size();
+    }
+    const auto build_ms = log_depth->metadata.find("build_ms");
+    const auto valid_ratio = log_depth->metadata.find("valid_ratio");
+    ROS_INFO_THROTTLE(
+        2.0,
+        "Panorama rig depth timestamp_ns=%llu cached_frames=%zu "
+        "valid_ratio=%s build_ms=%s",
+        static_cast<unsigned long long>(log_depth->timestamp_ns),
+        cached_frames,
+        valid_ratio == log_depth->metadata.end() ? "unknown" : valid_ratio->second.c_str(),
+        build_ms == log_depth->metadata.end() ? "unknown" : build_ms->second.c_str());
   }
 
   bool Subscribe(orbvi_sdk::StreamId stream) {
@@ -990,6 +1208,9 @@ class BridgeNode::Impl {
 
     auto result = client_->subscribePanorama(
         options,
+        [this](std::uint64_t rgb_timestamp_ns) {
+          return ClosestPanoramaDepth(rgb_timestamp_ns);
+        },
         [this](const orbvi_sdk::PanoramaFrameDelivery& delivery) {
           PublishPanorama(delivery);
         });
@@ -1000,9 +1221,14 @@ class BridgeNode::Impl {
     }
     panorama_subscription_ = std::move(result.value());
     ROS_INFO_STREAM(
-        "Subscribed Host SDK derived panorama from raw_fisheye_stream, size="
-        << options.stitch.width << "x" << options.stitch.height
+        "Subscribed Host SDK derived panorama from raw_fisheye_stream, output_size="
+        << options.stitch.width << "x" << PanoramaOutputHeight(options.stitch)
+        << ", full_height=" << options.stitch.height
+        << ", crop_top=" << options.stitch.crop_top
+        << ", crop_bottom=" << options.stitch.crop_bottom
+        << ", stitching_radius_m=" << options.stitch.stitching_radius_m
         << ", blend=" << orbvi_sdk::ToString(options.stitch.blend_mode)
+        << ", multiband_levels=" << options.stitch.multiband_levels
         << ", seam_mode=" << orbvi_sdk::ToString(options.stitch.seam_mode)
         << ", dp_seam_band_px=" << options.stitch.dp_seam_band_px
         << ", dp_seam_smoothness=" << options.stitch.dp_seam_smoothness
@@ -1010,8 +1236,32 @@ class BridgeNode::Impl {
         << (options.stitch.photometric_align ? "true" : "false")
         << ", seam_ghost_suppression="
         << (options.stitch.seam_ghost_suppression ? "true" : "false")
-        << ", seam_ghost_threshold=" << options.stitch.seam_ghost_threshold);
+        << ", seam_ghost_threshold=" << options.stitch.seam_ghost_threshold
+        << ", depth_assist=" << (options.stitch.depth_assist ? "true" : "false")
+        << ", depth_required=" << (options.stitch.depth_required ? "true" : "false")
+        << ", depth_range_m=" << options.stitch.depth_min_range_m
+        << ".." << options.stitch.depth_max_warp_range_m
+        << ", max_depth_delta_ms="
+        << (static_cast<double>(options.max_depth_timestamp_delta_ns) / 1.0e6)
+        << ", depth_source=shared-rig-depth-cache"
+        << ", max_stitch_threads=" << options.stitch.max_stitch_threads);
     return true;
+  }
+
+  std::shared_ptr<const orbvi_sdk::RigDepthPanorama> ClosestPanoramaDepth(
+      std::uint64_t rgb_timestamp_ns) {
+    std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
+    std::shared_ptr<const orbvi_sdk::RigDepthPanorama> best;
+    std::uint64_t best_delta = std::numeric_limits<std::uint64_t>::max();
+    for (const auto& depth : panorama_depth_frames_) {
+      const std::uint64_t delta =
+          TimestampDeltaNs(rgb_timestamp_ns, depth->timestamp_ns);
+      if (delta < best_delta) {
+        best = depth;
+        best_delta = delta;
+      }
+    }
+    return best;
   }
 
   template <typename MessageT>
@@ -1309,6 +1559,42 @@ class BridgeNode::Impl {
       return;
     }
     PublishMessage(JoinTopic(config_.topic_prefix, "pano/image"), std::move(message));
+    const auto camera_map = delivery.panorama.metadata.find("fisheye_camera_map");
+    const auto rotation =
+        delivery.panorama.metadata.find("fisheye_rotation_extrinsics_applied");
+    if (config_.panorama_options.stitch.depth_assist) {
+      const auto applied = delivery.panorama.metadata.find("depth_assist_applied");
+      const auto backend = delivery.panorama.metadata.find("multiband_backend");
+      const auto translation =
+          delivery.panorama.metadata.find("fisheye_translation_extrinsics_applied");
+      ROS_INFO_THROTTLE(
+          2.0,
+          "Panorama depth assist applied=%s backend=%s cameras=%s "
+          "rotation_extrinsics=%s translation_extrinsics=%s valid_ratio=%.3f "
+          "rgb_depth_delta=%.2fms depth_geometry=%.2fms stitch=%.2fms "
+          "assisted=%llu fallback=%llu sync_drops=%llu depth_failures=%llu",
+          applied == delivery.panorama.metadata.end() ? "unknown" : applied->second.c_str(),
+          backend == delivery.panorama.metadata.end() ? "unknown" : backend->second.c_str(),
+          camera_map == delivery.panorama.metadata.end() ? "unknown" : camera_map->second.c_str(),
+          rotation == delivery.panorama.metadata.end() ? "unknown" : rotation->second.c_str(),
+          translation == delivery.panorama.metadata.end() ? "unknown" : translation->second.c_str(),
+          delivery.stats.depth_valid_ratio,
+          delivery.stats.rgb_depth_delta_ms,
+          delivery.stats.depth_geometry_latency_ms,
+          delivery.stats.stitch_latency_ms,
+          static_cast<unsigned long long>(delivery.stats.depth_assisted_panoramas),
+          static_cast<unsigned long long>(delivery.stats.depth_fallback_panoramas),
+          static_cast<unsigned long long>(delivery.stats.depth_sync_drops),
+          static_cast<unsigned long long>(delivery.stats.depth_generation_failures));
+    } else {
+      ROS_INFO_THROTTLE(
+          2.0,
+          "Panorama geometry cameras=%s rotation_extrinsics=%s "
+          "translation_extrinsics=false depth_assist=false stitch=%.2fms",
+          camera_map == delivery.panorama.metadata.end() ? "unknown" : camera_map->second.c_str(),
+          rotation == delivery.panorama.metadata.end() ? "unknown" : rotation->second.c_str(),
+          delivery.stats.stitch_latency_ms);
+    }
   }
 
   void PublishImu(const orbvi_sdk::FrameView& frame) {
@@ -1359,7 +1645,11 @@ class BridgeNode::Impl {
       }
       PublishMessage(JoinTopic(config_.topic_prefix, "disparity"), std::move(message));
     }
-    PublishDepth(frame);
+    if (config_.publish_depth) {
+      PublishDepth(frame);
+    } else {
+      EnqueueDepthDerivedFrame(frame);
+    }
   }
 
   void PublishDepth(const orbvi_sdk::FrameView& frame) {
@@ -1480,6 +1770,9 @@ class BridgeNode::Impl {
   std::optional<DepthPanoramaLookup> depth_panorama_lookup_;
   std::optional<orbvi_sdk::PanoramaSubscriptionHandle> panorama_subscription_;
   std::vector<orbvi_sdk::SubscriptionHandle> subscriptions_;
+  std::mutex panorama_depth_mutex_;
+  std::deque<std::shared_ptr<const orbvi_sdk::RigDepthPanorama>> panorama_depth_frames_;
+  std::array<double, 3> panorama_depth_origin_reference_m_ = {0.0, 0.0, 0.0};
   mutable std::mutex rectified_left_images_mutex_;
   std::map<
       std::uint32_t,

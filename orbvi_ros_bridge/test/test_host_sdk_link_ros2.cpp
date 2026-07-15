@@ -96,6 +96,30 @@ TEST(OrbviRosBridgePanoramaOptions, ParsesMode2BlendTokens) {
   EXPECT_EQ(mode, orbvi_sdk::PanoramaBlendMode::MultiBand);
 }
 
+TEST(OrbviRosBridgePanoramaOptions, DepthAssistRequiresFixedSeamRoiMultiBand) {
+  orbvi_sdk::PanoramaStitchOptions options;
+  options.crop_top = 200;
+  options.crop_bottom = 200;
+  EXPECT_EQ(orbvi_ros_bridge::PanoramaOutputHeight(options), 624u);
+  EXPECT_FALSE(orbvi_ros_bridge::SupportsDepthAssistedSeamRoi(options));
+
+  options.blend_mode = orbvi_sdk::PanoramaBlendMode::MultiBand;
+  EXPECT_TRUE(orbvi_ros_bridge::SupportsDepthAssistedSeamRoi(options));
+
+  options.seam_ghost_suppression = true;
+  EXPECT_FALSE(orbvi_ros_bridge::SupportsDepthAssistedSeamRoi(options));
+  options.seam_ghost_suppression = false;
+  options.seam_mode = orbvi_sdk::PanoramaSeamMode::DynamicProgramming;
+  EXPECT_FALSE(orbvi_ros_bridge::SupportsDepthAssistedSeamRoi(options));
+}
+
+TEST(OrbviRosBridgeHostSdkLink, RigDepthPanoramaSymbolMatchesBundledHeaders) {
+  orbvi_sdk::OwnedFrame disparity;
+  orbvi_sdk::DepthCalibration calibration;
+  const auto result = orbvi_sdk::GenerateRigDepthPanorama(disparity, calibration);
+  EXPECT_FALSE(result);
+}
+
 TEST(OrbviRosBridgeDecodedImages, RectifiedPublicFrameIdRoutesToDirectionTopic) {
   orbvi_sdk::OwnedDecodedImage decoded;
   decoded.width = 1;

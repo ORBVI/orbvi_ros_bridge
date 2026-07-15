@@ -40,6 +40,8 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 | `/orbvi/disparity` | `sensor_msgs/Image` | 视差图 |
 | `/orbvi/depth` | `sensor_msgs/Image` | 生成的深度图 |
 | `/orbvi/depth/viz` | `sensor_msgs/Image` | 深度可视化图 |
+| `/orbvi/depth/panorama` | `sensor_msgs/Image` | 由四路视差生成的 `32FC1` 球面距离图 |
+| `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | 全景深度可视化图 |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | 深度生成的点云 |
 | `/orbvi/vio/odometry` | `nav_msgs/Odometry` | 优化后的 VIO 位姿 |
 | `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU 预测的 VIO 位姿 |
@@ -133,7 +135,18 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 ```
 
 公开 topic 固定在 `/orbvi` 下。全景入口使用内置 `config/pano_mode2.yaml` /
-`config/pano_mode2_ros2.yaml` 默认配置。
+`config/pano_mode2_ros2.yaml` 默认配置。默认以 2048x1024 完整角度画布投影，
+上下各裁 200 行后发布 2048x624 图像；默认使用固定接缝、4 层 MultiBand，以及
+鱼眼旋转/平移外参和可调的 2.0 m 有限拼接半径。物理相机映射固定为
+`front=3、right=2、rear=4、left=5`。
+双目网络输出的 disparity 天然晚于原始鱼眼帧，默认配置暂时关闭深度辅助，避免把
+旧深度用于运动目标；运行日志会打印实际相机映射及旋转外参是否生效。
+可选深度路径会缓存最近 4 个 `RigDepthPanorama`，RGB 回调只无阻塞读取时间最接近
+的缓存。只有完成 RGB/disparity 原始采集时刻对齐并验证后，才应重新开启该路径。
+
+深度辅助依赖新版 Host SDK ABI。更新 Bridge 时必须同时更新
+`third_party/orbvi_sdk/include/orbvi_sdk` 和对应架构的 `liborbvi_sdk`，然后清理
+`build/devel` 重新编译；不能只替换 `.so`。
 
 ROS2 launch 会为 bridge 进程设置内置 Fast DDS 共享内存 profile。单独启动的
 `ros2 topic`、rqt、rviz 或其它消费进程如需消费本机大流量 topic，使用相同环境：

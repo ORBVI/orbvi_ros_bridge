@@ -117,6 +117,9 @@ std::string VioTopicSuffix(const orbvi_sdk::FrameView& frame);
 bool MakeLivoxCustomMessage(
     const orbvi_sdk::FrameView& frame,
     livox_ros_driver2::msg::CustomMsg* out);
+bool MakeLivoxPointCloud2(
+    const livox_ros_driver2::msg::CustomMsg& msg,
+    sensor_msgs::msg::PointCloud2* out);
 bool MakeVioOdometry(const orbvi_sdk::FrameView& frame, nav_msgs::msg::Odometry* out);
 
 }  // namespace orbvi_ros_bridge

@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <sensor_msgs/point_cloud2_iterator.hpp>
+
 #include "frame_conversions_ros2.hpp"
 #include "orbvi_sdk/client.hpp"
 #include "panorama_options.hpp"
@@ -469,4 +471,30 @@ TEST(OrbviRosBridgeDepthImages, SdkPointCloudMapsToRosPointCloud2) {
   EXPECT_FALSE(message.is_dense);
   EXPECT_GT(message.point_step, 0u);
   EXPECT_EQ(message.data.size(), message.point_step * message.width);
+}
+
+TEST(OrbviRosBridgeLivox, CustomMessageMapsToRosPointCloud2) {
+  livox_ros_driver2::msg::CustomMsg livox_message;
+  livox_message.header.frame_id = "livox_frame";
+  livox_ros_driver2::msg::CustomPoint point;
+  point.x = 1.0f;
+  point.y = 2.0f;
+  point.z = 3.0f;
+  point.reflectivity = 42;
+  livox_message.points.push_back(point);
+
+  sensor_msgs::msg::PointCloud2 cloud;
+  ASSERT_TRUE(orbvi_ros_bridge::MakeLivoxPointCloud2(livox_message, &cloud));
+  EXPECT_EQ(cloud.header.frame_id, "livox_frame");
+  EXPECT_EQ(cloud.height, 1u);
+  EXPECT_EQ(cloud.width, 1u);
+
+  sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud, "z");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_intensity(cloud, "intensity");
+  EXPECT_FLOAT_EQ(*iter_x, 1.0f);
+  EXPECT_FLOAT_EQ(*iter_y, 2.0f);
+  EXPECT_FLOAT_EQ(*iter_z, 3.0f);
+  EXPECT_FLOAT_EQ(*iter_intensity, 42.0f);
 }

@@ -273,6 +273,10 @@ class Client {
   Result<PanoramaSubscriptionHandle> subscribePanorama(
       PanoramaSubscribeOptions options,
       PanoramaFrameCallback callback);
+  Result<PanoramaSubscriptionHandle> subscribePanorama(
+      PanoramaSubscribeOptions options,
+      PanoramaDepthProvider depth_provider,
+      PanoramaFrameCallback callback);
 
  private:
   class Impl;

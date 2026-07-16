@@ -322,6 +322,10 @@ else()
       PATTERN "*.xml"
       PATTERN "*.yaml"
   )
+  install(DIRECTORY visuallize_config/
+    DESTINATION share/${PROJECT_NAME}/visuallize_config
+    FILES_MATCHING PATTERN "*.rviz"
+  )
 
   ament_add_gtest(test_orbvi_ros_bridge_host_sdk_link_ros2 test/test_host_sdk_link_ros2.cpp)
   if(TARGET test_orbvi_ros_bridge_host_sdk_link_ros2)

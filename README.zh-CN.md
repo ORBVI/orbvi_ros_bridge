@@ -39,12 +39,23 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU 流 |
 | `/orbvi/disparity` | `sensor_msgs/Image` | 视差图 |
 | `/orbvi/depth` | `sensor_msgs/Image` | 生成的深度图 |
-| `/orbvi/depth/viz` | `sensor_msgs/Image` | 深度可视化图 |
+| `/orbvi/<front\|right\|rear\|left>/depth/viz` | `sensor_msgs/Image` | 四方向深度可视化图，可选叠加 5×5 米制深度网格 |
 | `/orbvi/depth/panorama` | `sensor_msgs/Image` | 由四路视差生成的 `32FC1` 球面距离图 |
 | `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | 全景深度可视化图 |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | 深度生成的点云 |
 | `/orbvi/vio/odometry` | `nav_msgs/Odometry` | 优化后的 VIO 位姿 |
 | `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU 预测的 VIO 位姿 |
+
+矫正图中的方位表示双目对的观察方向，不表示原始鱼眼相机本身。八路图像固定按
+`front/left、front/right、right/left、right/right、rear/left、rear/right、left/left、left/right`
+发布，物理像素来源如下：
+
+| 双目方位 | 左目来源 | 右目来源 |
+| --- | --- | --- |
+| `front` | front 鱼眼右半部分 | right 鱼眼左半部分 |
+| `right` | right 鱼眼右半部分 | rear 鱼眼左半部分 |
+| `rear` | rear 鱼眼右半部分 | left 鱼眼左半部分 |
+| `left` | left 鱼眼右半部分 | front 鱼眼左半部分 |
 
 ## 安装依赖
 
@@ -111,7 +122,7 @@ source install/setup.bash
 
 ## 启动 Bridge
 
-根据需要选择一个 launch 文件。对外启动参数只需要 `host`。
+根据需要选择一个 launch 文件。三套 launch 的公共参数见下文。
 
 视觉数据、深度和 VIO：
 
@@ -119,6 +130,21 @@ source install/setup.bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
+
+如需在四方向深度可视化图中绘制 5×5 网格，并显示每个网格交点的深度值，启用
+`depth_viz_show_grid_values`：
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> depth_viz_show_grid_values:=true
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> depth_viz_show_grid_values:=true
+```
+
+有效深度保留两位小数并带 `m` 单位；无效或超出显示范围的采样点显示为 `--`。
+该参数只修改 `/orbvi/<front|right|rear|left>/depth/viz` 四路可视化图，原始深度图和
+点云输出不受影响。叠加开销固定为每方向 5 条横线、5 条竖线和 25 个文本标签，直接
+在现有可视化缓冲区原位绘制；参数关闭时完全跳过这部分处理。
 
 视觉数据、深度、VIO 和 MID360：
 
@@ -139,6 +165,10 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 上下各裁 200 行后发布 2048x624 图像；默认使用固定接缝、4 层 MultiBand，以及
 鱼眼旋转/平移外参和可调的 2.0 m 有限拼接半径。物理相机映射固定为
 `front=3、right=2、rear=4、left=5`。
+RGB SDK 输出原本采用 `[-pi, pi)` 方位范围，而深度全景采用 `[0, 2*pi)`；默认配置
+`pano_align_to_depth: true` 会在发布时将 RGB 无插值循环平移半幅，使
+`/orbvi/pano/image` 与 `/orbvi/depth/panorama` 的同一横坐标表示同一方位。设为
+`false` 可恢复 Host SDK 的原始 RGB 布局。
 双目网络输出的 disparity 天然晚于原始鱼眼帧，默认配置暂时关闭深度辅助，避免把
 旧深度用于运动目标；运行日志会打印实际相机映射及旋转外参是否生效。
 可选深度路径会缓存最近 4 个 `RigDepthPanorama`，RGB 回调只无阻塞读取时间最接近
@@ -224,7 +254,7 @@ scripts/orbvi_ros_bridge_rate_check.sh \
 
 ## Launch 文件
 
-对外接口固定为三套 launch 配置。每个 launch 只接收 `host`；stream 组合和参考配置保留在 launch 文件内部。
+对外接口固定为三套 launch 配置；stream 组合和参考配置保留在 launch 文件内部。
 
 | 能力 | ROS1 launch | ROS2 launch | 首要检查 topic |
 | --- | --- | --- | --- |
@@ -235,6 +265,8 @@ scripts/orbvi_ros_bridge_rate_check.sh \
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI 设备 IP 或 hostname |
+| `publish_lidar_pcl` | `false` | 额外将 Livox `CustomMsg` 转换并发布到 `/orbvi/lidar/points` |
+| `depth_viz_show_grid_values` | `false` | 在每路方向深度可视化图上绘制 5×5 网格及网格交点米制深度值 |
 
 Topic 名称固定在 `/orbvi` 下。
 

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <type_traits>
@@ -39,6 +40,7 @@ constexpr double kDepthPanoramaMinDisparityPx = 0.5;
 constexpr double kDepthPanoramaMinRangeM = 0.1;
 constexpr double kDepthPanoramaMaxRangeM = 20.0;
 constexpr const char* kDepthPanoramaFrameId = "orbvi/depth/panorama";
+constexpr int kDepthVisualizationGridSize = 5;
 constexpr double kPi = 3.141592653589793238462643383279502884;
 
 struct Rgb {
@@ -326,28 +328,19 @@ bool NormalizeRectifiedSide(std::string side, std::string* out) {
 std::string RectifiedDirectionForPairSide(
     std::uint32_t pair_id,
     const std::string& side) {
-  static const char* const kLeftSideDirections[] = {
+  static const char* const kPairDirections[] = {
       "front",
       "right",
       "rear",
       "left",
   };
-  static const char* const kRightSideDirections[] = {
-      "right",
-      "rear",
-      "left",
-      "front",
-  };
-  if (pair_id >= 4u) {
+  if (pair_id >= 4u || (side != "left" && side != "right")) {
     return "";
   }
-  if (side == "left") {
-    return kLeftSideDirections[pair_id];
-  }
-  if (side == "right") {
-    return kRightSideDirections[pair_id];
-  }
-  return "";
+  // pair_id names the stereo viewing direction. The right image is sourced
+  // from the next physical fisheye around the rig, but it still belongs to
+  // the same directional stereo pair as the left image.
+  return kPairDirections[pair_id];
 }
 
 bool IsRectifiedDirection(const std::string& direction) {
@@ -422,6 +415,25 @@ bool ResolveRectifiedPairSide(
     return true;
   }
   return false;
+}
+
+bool ResolveDecodedRectifiedPairSide(
+    const orbvi_sdk::FrameDelivery& delivery,
+    std::size_t decoded_index,
+    std::uint32_t* pair_id,
+    std::string* side) {
+  if (pair_id == nullptr || side == nullptr) {
+    return false;
+  }
+  const MetadataMap& metadata = delivery.frame.metadata;
+  const std::string pair_key = RectifiedMetadataKey(decoded_index, "pair_id");
+  const std::string side_key = RectifiedMetadataKey(decoded_index, "side");
+  if (ParseU32(MetadataValue(metadata, pair_key), pair_id) &&
+      NormalizeRectifiedSide(MetadataValue(metadata, side_key), side) &&
+      !RectifiedDirectionForPairSide(*pair_id, *side).empty()) {
+    return true;
+  }
+  return ResolveRectifiedPairSide(metadata, pair_id, side);
 }
 
 bool ResolveRectifiedFrameId(
@@ -881,6 +893,147 @@ bool SliceImageRows(
   return true;
 }
 
+std::string FormatDepthMeters(double depth_m) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(2) << depth_m << "m";
+  return stream.str();
+}
+
+bool AnnotateDepthGrid(
+    const orbvi_sdk::DepthMapView& depth,
+    const orbvi_sdk::DepthCalibration& calibration,
+    const DepthVisualizationOptions& options,
+    sensor_msgs::msg::Image* image) {
+  if (!options.show_grid_values) {
+    return true;
+  }
+  if (image == nullptr || image->encoding != "bgr8" || image->data.empty() ||
+      image->width != depth.width || image->height != depth.height ||
+      image->step < image->width * 3u) {
+    return false;
+  }
+
+  const std::size_t required_size =
+      static_cast<std::size_t>(image->step) * image->height;
+  if (image->data.size() < required_size) {
+    return false;
+  }
+
+  cv::Mat bgr(
+      static_cast<int>(image->height),
+      static_cast<int>(image->width),
+      CV_8UC3,
+      image->data.data(),
+      static_cast<std::size_t>(image->step));
+  const cv::Scalar white(255, 255, 255);
+  const cv::Scalar black(0, 0, 0);
+
+  for (const auto& tile : calibration.tiles) {
+    const std::uint32_t y0 = tile.tile_index * calibration.tile_height;
+    if (tile.width == 0 || tile.height == 0 ||
+        tile.width > depth.width || y0 >= depth.height ||
+        tile.height > depth.height - y0) {
+      continue;
+    }
+
+    const int grid_thickness = std::clamp(
+        static_cast<int>(std::lround(
+            static_cast<double>(std::min(tile.width, tile.height)) / 400.0)),
+        1,
+        2);
+    for (int index = 0; index < kDepthVisualizationGridSize; ++index) {
+      const int x = static_cast<int>(
+          static_cast<std::uint64_t>(index + 1) * tile.width /
+          (kDepthVisualizationGridSize + 1));
+      const int y = static_cast<int>(
+          y0 + static_cast<std::uint64_t>(index + 1) * tile.height /
+                   (kDepthVisualizationGridSize + 1));
+      cv::line(
+          bgr,
+          cv::Point(x, static_cast<int>(y0)),
+          cv::Point(x, static_cast<int>(y0 + tile.height - 1u)),
+          white,
+          grid_thickness,
+          cv::LINE_8);
+      cv::line(
+          bgr,
+          cv::Point(0, y),
+          cv::Point(static_cast<int>(tile.width - 1u), y),
+          white,
+          grid_thickness,
+          cv::LINE_8);
+    }
+
+    int reference_baseline = 0;
+    const cv::Size reference_size = cv::getTextSize(
+        "20.00m", cv::FONT_HERSHEY_SIMPLEX, 1.0, 1, &reference_baseline);
+    const double grid_spacing_x = static_cast<double>(tile.width) /
+                                  (kDepthVisualizationGridSize + 1);
+    const double grid_spacing_y = static_cast<double>(tile.height) /
+                                  (kDepthVisualizationGridSize + 1);
+    const double width_scale =
+        (grid_spacing_x - 6.0) / std::max(1, reference_size.width);
+    const double height_scale =
+        (grid_spacing_y - 6.0) /
+        std::max(1, reference_size.height + reference_baseline);
+    const double font_scale = std::clamp(
+        std::min(width_scale, height_scale), 0.25, 0.8);
+    const int text_thickness = font_scale >= 0.65 ? 2 : 1;
+    const int text_offset = std::max(3, grid_thickness * 2);
+
+    for (int row = 0; row < kDepthVisualizationGridSize; ++row) {
+      const std::uint32_t sample_y =
+          y0 + static_cast<std::uint64_t>(row + 1) * tile.height /
+                   (kDepthVisualizationGridSize + 1);
+      for (int column = 0; column < kDepthVisualizationGridSize; ++column) {
+        const std::uint32_t sample_x =
+            static_cast<std::uint64_t>(column + 1) * tile.width /
+            (kDepthVisualizationGridSize + 1);
+
+        double depth_m = 0.0;
+        const std::string label =
+            ReadDepthMeters(depth, sample_x, sample_y, &depth_m) &&
+                    IsValidDepth(depth_m, options)
+                ? FormatDepthMeters(depth_m)
+                : "--";
+        int baseline = 0;
+        const cv::Size text_size = cv::getTextSize(
+            label,
+            cv::FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            text_thickness,
+            &baseline);
+        const int text_x = std::min(
+            static_cast<int>(tile.width) - text_size.width - 1,
+            static_cast<int>(sample_x) + text_offset);
+        const int text_y = std::max(
+            static_cast<int>(y0) + text_size.height + 1,
+            static_cast<int>(sample_y) - text_offset);
+        const cv::Point origin(text_x, text_y);
+        cv::putText(
+            bgr,
+            label,
+            origin,
+            cv::FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            black,
+            text_thickness + 2,
+            cv::LINE_AA);
+        cv::putText(
+            bgr,
+            label,
+            origin,
+            cv::FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            white,
+            text_thickness,
+            cv::LINE_AA);
+      }
+    }
+  }
+  return true;
+}
+
 std::vector<ImageOutput> SplitVerticalTileImage(
     const sensor_msgs::msg::Image& source,
     const orbvi_sdk::DepthCalibration& calibration,
@@ -1113,7 +1266,10 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
     } else {
       std::string direction;
       std::string side;
-      if (!ResolveRectifiedFrameId(decoded.frame_id, &direction, &side)) {
+      std::uint32_t pair_id = 0;
+      if (ResolveDecodedRectifiedPairSide(delivery, index, &pair_id, &side)) {
+        direction = RectifiedDirectionForPairSide(pair_id, side);
+      } else if (!ResolveRectifiedFrameId(decoded.frame_id, &direction, &side)) {
         return;
       }
       output.topic_suffix = RectifiedTopicSuffix(direction, side, "image");
@@ -1136,10 +1292,17 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
 
 bool MakePanoramaImageMessage(
     const orbvi_sdk::PanoramaImageView& panorama,
-    sensor_msgs::msg::Image* out) {
+    sensor_msgs::msg::Image* out,
+    bool align_to_depth_azimuth) {
   if (out == nullptr || panorama.data == nullptr ||
       panorama.data_size == 0 || panorama.width == 0 ||
-      panorama.height == 0 || panorama.stride == 0) {
+      panorama.height == 0 || panorama.stride == 0 ||
+      panorama.stride < panorama.width * 3u) {
+    return false;
+  }
+  const std::size_t expected_size =
+      static_cast<std::size_t>(panorama.stride) * panorama.height;
+  if (panorama.data_size < expected_size) {
     return false;
   }
   out->header = MakeHeader(
@@ -1150,7 +1313,30 @@ bool MakePanoramaImageMessage(
   out->encoding = "bgr8";
   out->is_bigendian = 0;
   out->step = panorama.stride;
-  out->data.assign(panorama.data, panorama.data + panorama.data_size);
+  if (!align_to_depth_azimuth) {
+    out->data.assign(panorama.data, panorama.data + expected_size);
+  } else {
+    // Host SDK RGB uses [-pi, pi), while the Bridge depth panorama uses
+    // [0, 2*pi). A half-width cyclic shift gives both topics the depth
+    // panorama's pixel-to-azimuth convention without resampling the image.
+    const std::size_t row_pixels_size = static_cast<std::size_t>(panorama.width) * 3u;
+    const std::size_t shift_size = static_cast<std::size_t>(panorama.width / 2u) * 3u;
+    const std::size_t first_size = row_pixels_size - shift_size;
+    out->data.resize(expected_size);
+    for (std::uint32_t row = 0; row < panorama.height; ++row) {
+      const auto row_offset = static_cast<std::size_t>(row) * panorama.stride;
+      const auto* source = panorama.data + row_offset;
+      auto* target = out->data.data() + row_offset;
+      std::memcpy(target, source + shift_size, first_size);
+      std::memcpy(target + first_size, source, shift_size);
+      if (panorama.stride > row_pixels_size) {
+        std::memcpy(
+            target + row_pixels_size,
+            source + row_pixels_size,
+            panorama.stride - row_pixels_size);
+      }
+    }
+  }
   return true;
 }
 
@@ -1542,6 +1728,9 @@ std::vector<ImageOutput> MakeSplitDepthVisualizationImages(
     const orbvi_sdk::DepthCalibration& calibration) {
   sensor_msgs::msg::Image image;
   if (!MakeDepthVisualizationImage(depth, source_disparity, options, &image)) {
+    return {};
+  }
+  if (!AnnotateDepthGrid(depth, calibration, options, &image)) {
     return {};
   }
   return SplitVerticalTileImage(image, calibration, "depth/viz");

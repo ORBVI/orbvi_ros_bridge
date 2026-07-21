@@ -41,12 +41,24 @@ ROS1 and ROS2 use the same topic names. ROS2 message packages use the matching
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU stream |
 | `/orbvi/disparity` | `sensor_msgs/Image` | Disparity image |
 | `/orbvi/depth` | `sensor_msgs/Image` | Generated depth image |
-| `/orbvi/depth/viz` | `sensor_msgs/Image` | Depth visualization image |
+| `/orbvi/<front\|right\|rear\|left>/depth/viz` | `sensor_msgs/Image` | Directional depth visualization; optionally includes a 5x5 metric grid |
 | `/orbvi/depth/panorama` | `sensor_msgs/Image` | `32FC1` spherical range derived from four disparity tiles |
 | `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | Depth-panorama visualization |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | Depth-derived point cloud |
 | `/orbvi/vio/odometry` | `nav_msgs/Odometry` | Optimized VIO pose |
 | `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU-propagated VIO pose |
+
+The rectified direction names the stereo pair's viewing direction, not the
+physical source fisheye. Images are published in the fixed order
+`front/left`, `front/right`, `right/left`, `right/right`, `rear/left`,
+`rear/right`, `left/left`, `left/right` with these pixel sources:
+
+| Stereo direction | Left-eye source | Right-eye source |
+| --- | --- | --- |
+| `front` | Right half of front fisheye | Left half of right fisheye |
+| `right` | Right half of right fisheye | Left half of rear fisheye |
+| `rear` | Right half of rear fisheye | Left half of left fisheye |
+| `left` | Right half of left fisheye | Left half of front fisheye |
 
 ## Install Dependencies
 
@@ -113,7 +125,8 @@ source install/setup.bash
 
 ## Start The Bridge
 
-Choose one launch file. Each user-facing launch accepts only `host`.
+Choose one launch file. All user-facing launch files accept the common
+arguments documented below.
 
 Visual data, depth and VIO:
 
@@ -121,6 +134,24 @@ Visual data, depth and VIO:
 roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
+
+To draw a 5x5 grid and the depth at every grid intersection on all four
+directional depth visualizations, enable `depth_viz_show_grid_values`:
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> depth_viz_show_grid_values:=true
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> depth_viz_show_grid_values:=true
+```
+
+Valid values are rendered with two decimal places and the `m` suffix; invalid
+or out-of-range samples are rendered as `--`. The option changes only the four
+`/orbvi/<front|right|rear|left>/depth/viz` images. Raw depth and point-cloud
+outputs are unchanged. Overlay work is bounded to five horizontal lines, five
+vertical lines, and 25 labels per direction; drawing is in-place on the
+existing visualization buffer and is skipped entirely while the option is
+disabled.
 
 Visual data, depth, VIO and MID360:
 
@@ -142,7 +173,12 @@ projects a 2048x1024 angular canvas, crops 200 rows at the top and bottom, and
 publishes 2048x624 fixed-seam, four-level MultiBand output using the calibrated
 fisheye rotations and translations with a configurable 2.0 m finite stitching
 radius. The physical mapping is fixed as `front=3`, `right=2`,
-`rear=4`, `left=5`. Depth assistance is disabled by default because disparity
+`rear=4`, `left=5`. The Host SDK RGB output uses a `[-pi, pi)` azimuth range,
+while the depth panorama uses `[0, 2*pi)`. The default
+`pano_align_to_depth: true` setting cyclically shifts RGB by half a frame
+without interpolation, so equal horizontal coordinates on `/orbvi/pano/image`
+and `/orbvi/depth/panorama` represent the same azimuth. Set it to `false` to
+restore the Host SDK's original RGB layout. Depth assistance is disabled by default because disparity
 from the stereo network trails the raw fisheye capture; using stale geometry on
 moving objects would increase ghosting. A throttled log reports the effective
 camera mapping and whether the rotation extrinsics are applied.
@@ -235,8 +271,7 @@ Outputs are written to a timestamped directory:
 ## Launch Files
 
 The public interface is intentionally limited to three launch configurations.
-Each launch accepts only `host`; stream selection and reference settings are
-kept inside the launch file.
+Stream selection and reference settings are kept inside the launch file.
 
 | Capability | ROS1 launch | ROS2 launch | First topics to check |
 | --- | --- | --- | --- |
@@ -247,6 +282,8 @@ kept inside the launch file.
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
+| `publish_lidar_pcl` | `false` | Also convert Livox `CustomMsg` to `/orbvi/lidar/points` |
+| `depth_viz_show_grid_values` | `false` | Draw a 5x5 grid and metric grid-point values on each directional depth visualization |
 
 Topic names are fixed under `/orbvi`.
 

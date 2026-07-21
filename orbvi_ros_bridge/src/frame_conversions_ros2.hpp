@@ -28,6 +28,7 @@ using ImageOutput = TopicMessage<sensor_msgs::msg::Image>;
 struct DepthVisualizationOptions {
   double min_depth_m = 0.1;
   double max_depth_m = 20.0;
+  bool show_grid_values = false;
   std::uint32_t pointcloud_stride = 4;
 };
 
@@ -67,7 +68,8 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
     const std::vector<std::string>& raw_camera_ids = {});
 bool MakePanoramaImageMessage(
     const orbvi_sdk::PanoramaImageView& panorama,
-    sensor_msgs::msg::Image* out);
+    sensor_msgs::msg::Image* out,
+    bool align_to_depth_azimuth = false);
 
 bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Image* out);
 std::vector<ImageOutput> MakeSplitDisparityImages(

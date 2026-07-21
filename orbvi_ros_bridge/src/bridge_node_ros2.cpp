@@ -71,6 +71,7 @@ struct BridgeConfig {
   bool publish_depth_panorama = true;
   bool colorize_depth_pointcloud = true;
   bool publish_panorama = false;
+  bool panorama_align_to_depth = true;
   bool publish_lidar_pcl = false;
   bool sensor_data_best_effort = true;
   bool log_delivery_stats = false;
@@ -690,6 +691,15 @@ class BridgeNode::Impl {
         config->panorama_options.stitch.fov_half_deg,
         config->panorama_options.stitch.fov_half_deg);
 
+    private_node_.param<bool>(
+        "pano_align_to_depth",
+        config->panorama_align_to_depth,
+        config->panorama_align_to_depth);
+    private_node_.param<bool>(
+        "panorama_align_to_depth",
+        config->panorama_align_to_depth,
+        config->panorama_align_to_depth);
+
     private_node_.param<double>(
         "pano_stitching_radius_m",
         config->panorama_options.stitch.stitching_radius_m,
@@ -927,6 +937,10 @@ class BridgeNode::Impl {
         "depth_viz_max_depth_m",
         config->depth_visualization_options.max_depth_m,
         config->depth_visualization_options.max_depth_m);
+    private_node_.param<bool>(
+        "depth_viz_show_grid_values",
+        config->depth_visualization_options.show_grid_values,
+        config->depth_visualization_options.show_grid_values);
     if (config->depth_visualization_options.max_depth_m <=
         config->depth_visualization_options.min_depth_m) {
       config->depth_visualization_options.min_depth_m = 0.1;
@@ -1036,6 +1050,8 @@ class BridgeNode::Impl {
         << ", invalid_policy=" << orbvi_sdk::ToString(config_.depth_options.invalid_policy)
         << ", max_depth_m=" << config_.depth_options.max_depth_m
         << ", viz=" << (config_.publish_depth_viz ? "true" : "false")
+        << ", viz_grid_values="
+        << (config_.depth_visualization_options.show_grid_values ? "true" : "false")
         << ", pointcloud=" << (config_.publish_depth_pointcloud ? "true" : "false")
         << ", pointcloud_stride="
         << config_.pointcloud_options.sample_stride
@@ -1554,7 +1570,8 @@ class BridgeNode::Impl {
 
   void PublishPanorama(const orbvi_sdk::PanoramaFrameDelivery& delivery) {
     sensor_msgs::msg::Image message;
-    if (!MakePanoramaImageMessage(delivery.panorama.view(), &message)) {
+    if (!MakePanoramaImageMessage(
+            delivery.panorama.view(), &message, config_.panorama_align_to_depth)) {
       ROS_WARN_THROTTLE(5.0, "Failed to convert Host SDK panorama to ROS Image");
       return;
     }
@@ -1570,12 +1587,14 @@ class BridgeNode::Impl {
       ROS_INFO_THROTTLE(
           2.0,
           "Panorama depth assist applied=%s backend=%s cameras=%s "
+          "align_to_depth=%s "
           "rotation_extrinsics=%s translation_extrinsics=%s valid_ratio=%.3f "
           "rgb_depth_delta=%.2fms depth_geometry=%.2fms stitch=%.2fms "
           "assisted=%llu fallback=%llu sync_drops=%llu depth_failures=%llu",
           applied == delivery.panorama.metadata.end() ? "unknown" : applied->second.c_str(),
           backend == delivery.panorama.metadata.end() ? "unknown" : backend->second.c_str(),
           camera_map == delivery.panorama.metadata.end() ? "unknown" : camera_map->second.c_str(),
+          config_.panorama_align_to_depth ? "true" : "false",
           rotation == delivery.panorama.metadata.end() ? "unknown" : rotation->second.c_str(),
           translation == delivery.panorama.metadata.end() ? "unknown" : translation->second.c_str(),
           delivery.stats.depth_valid_ratio,
@@ -1589,9 +1608,10 @@ class BridgeNode::Impl {
     } else {
       ROS_INFO_THROTTLE(
           2.0,
-          "Panorama geometry cameras=%s rotation_extrinsics=%s "
+          "Panorama geometry cameras=%s align_to_depth=%s rotation_extrinsics=%s "
           "translation_extrinsics=false depth_assist=false stitch=%.2fms",
           camera_map == delivery.panorama.metadata.end() ? "unknown" : camera_map->second.c_str(),
+          config_.panorama_align_to_depth ? "true" : "false",
           rotation == delivery.panorama.metadata.end() ? "unknown" : rotation->second.c_str(),
           delivery.stats.stitch_latency_ms);
     }

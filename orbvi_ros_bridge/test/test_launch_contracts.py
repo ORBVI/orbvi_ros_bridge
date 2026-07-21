@@ -24,6 +24,12 @@ ROS2_USER_LAUNCHES = {
     "orbvi_ros_bridge_pano.launch.py": PANO_STREAMS,
 }
 
+USER_ARGUMENT_DEFAULTS = {
+    "host": "127.0.0.1",
+    "publish_lidar_pcl": "false",
+    "depth_viz_show_grid_values": "false",
+}
+
 PANORAMA_ARGUMENT_DEFAULTS = {
     "pano_profile": "baseline",
     "pano_width": "2048",
@@ -31,6 +37,7 @@ PANORAMA_ARGUMENT_DEFAULTS = {
     "pano_crop_top": "200",
     "pano_crop_bottom": "200",
     "pano_fov_half_deg": "95.0",
+    "pano_align_to_depth": "true",
     "pano_stitching_radius_m": "2.0",
     "pano_seam_blend_px": "16",
     "pano_seam_mode": "fixed",
@@ -123,29 +130,38 @@ class LaunchContractTest(unittest.TestCase):
             sorted([*ROS2_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch.py"]),
         )
 
-    def test_ros1_launch_configs_expose_only_host(self):
+    def test_ros1_launch_configs_expose_supported_user_arguments(self):
         for launch_name, expected_streams in ROS1_USER_LAUNCHES.items():
             with self.subTest(launch_name=launch_name):
                 path = PACKAGE_ROOT / "launch" / launch_name
                 self.assertEqual(
                     ros1_arg_defaults(path),
-                    {"host": "127.0.0.1", "publish_lidar_pcl": "false"},
+                    USER_ARGUMENT_DEFAULTS,
                 )
                 self.assertEqual(ros1_param_value(path, "streams"), expected_streams)
+                self.assertEqual(
+                    ros1_param_value(path, "depth_viz_show_grid_values"),
+                    "$(arg depth_viz_show_grid_values)",
+                )
                 self.assertNotIn("pano", VISUAL_STREAMS.split(","))
                 self.assertIn("pano", PANO_STREAMS.split(","))
 
-    def test_ros2_launch_configs_expose_only_host(self):
+    def test_ros2_launch_configs_expose_supported_user_arguments(self):
         for launch_name, expected_streams in ROS2_USER_LAUNCHES.items():
             with self.subTest(launch_name=launch_name):
                 path = PACKAGE_ROOT / "launch" / "ros2" / launch_name
                 self.assertEqual(
                     ros2_argument_defaults(path),
-                    {"host": "127.0.0.1", "publish_lidar_pcl": "false"},
+                    USER_ARGUMENT_DEFAULTS,
                 )
                 parameters = ros2_dict_assignment(path, "DEFAULT_BRIDGE_PARAMETERS")
                 self.assertEqual(parameters["streams"], expected_streams)
-                self.assertIn("LaunchConfiguration(\"host\")", path.read_text(encoding="utf-8"))
+                source = path.read_text(encoding="utf-8")
+                self.assertIn("LaunchConfiguration(\"host\")", source)
+                self.assertIn(
+                    "LaunchConfiguration(\n        \"depth_viz_show_grid_values\")",
+                    source,
+                )
 
     def test_only_pano_launch_loads_pano_config(self):
         for launch_name in ROS1_USER_LAUNCHES:
@@ -170,6 +186,16 @@ class LaunchContractTest(unittest.TestCase):
                 values = yaml_scalar_defaults(PACKAGE_ROOT / "config" / config_name)
                 for name, expected_value in PANORAMA_ARGUMENT_DEFAULTS.items():
                     self.assertEqual(values[name], expected_value)
+
+    def test_all_pano_configs_align_rgb_to_depth_azimuth(self):
+        for config_name in (
+            "pano_mode2.yaml",
+            "pano_mode2_ros2.yaml",
+            "pano_mode2_depth_assist.yaml",
+        ):
+            with self.subTest(config_name=config_name):
+                values = yaml_scalar_defaults(PACKAGE_ROOT / "config" / config_name)
+                self.assertEqual(values["pano_align_to_depth"], "true")
 
 
 if __name__ == "__main__":

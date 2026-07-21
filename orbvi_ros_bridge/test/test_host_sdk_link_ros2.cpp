@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -59,6 +60,21 @@ TEST(OrbviRosBridgePanoramaImages, HostSdkPanoramaRoutesToImageTopic) {
   EXPECT_EQ(message.encoding, "bgr8");
   EXPECT_EQ(message.step, 6u);
   EXPECT_EQ(message.data.size(), panorama.data.size());
+}
+
+TEST(OrbviRosBridgePanoramaImages, AlignsHostSdkAzimuthToDepthPanorama) {
+  orbvi_sdk::OwnedPanoramaImage panorama;
+  panorama.width = 4;
+  panorama.height = 1;
+  panorama.stride = 14;
+  panorama.data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 90, 91};
+
+  sensor_msgs::msg::Image message;
+  ASSERT_TRUE(orbvi_ros_bridge::MakePanoramaImageMessage(
+      panorama.view(), &message, true));
+  const std::vector<std::uint8_t> expected = {
+      7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 90, 91};
+  EXPECT_EQ(message.data, expected);
 }
 
 TEST(OrbviRosBridgePanoramaOptions, ParsesDynamicSeamModeTokens) {
@@ -185,6 +201,47 @@ TEST(OrbviRosBridgeDecodedImages, InvalidRectifiedMetadataDoesNotPublishInternal
   EXPECT_TRUE(outputs.empty());
 }
 
+TEST(OrbviRosBridgeDecodedImages, RectifiedBundleUsesPairDirectionForBothEyes) {
+  const std::vector<std::string> directions = {"front", "right", "rear", "left"};
+  orbvi_sdk::FrameDelivery delivery;
+  delivery.frame.header.stream_id = orbvi_sdk::StreamId::RectifiedFisheye;
+  delivery.frame.metadata["bundle_type"] = "RECTIFIED_FISHEYE_BUNDLE";
+  for (std::size_t i = 0; i < 8u; ++i) {
+    const std::size_t pair_id = i / 2u;
+    const std::string side = (i % 2u == 0u) ? "left" : "right";
+    const std::string legacy_direction =
+        side == "left" ? directions[pair_id] : directions[(pair_id + 1u) % 4u];
+    orbvi_sdk::OwnedDecodedImage decoded;
+    decoded.width = 1;
+    decoded.height = 1;
+    decoded.stride = 3;
+    decoded.frame_id = "orbvi/rectified/" + legacy_direction + "/" + side;
+    decoded.camera_id = legacy_direction + "/" + side;
+    decoded.data = {static_cast<std::uint8_t>(i), 0, 0};
+    delivery.decoded_images.push_back(std::move(decoded));
+    const std::string prefix = "rectified." + std::to_string(i) + ".";
+    delivery.frame.metadata[prefix + "pair_id"] = std::to_string(pair_id);
+    delivery.frame.metadata[prefix + "side"] = side;
+  }
+
+  const auto outputs = orbvi_ros_bridge::MakeDecodedImageMessages(
+      orbvi_sdk::StreamId::RectifiedFisheye,
+      delivery);
+  ASSERT_EQ(outputs.size(), 8u);
+  for (std::size_t i = 0; i < outputs.size(); ++i) {
+    const std::size_t pair_id = i / 2u;
+    const std::string side = (i % 2u == 0u) ? "left" : "right";
+    EXPECT_EQ(
+        outputs[i].topic_suffix,
+        "rectified/" + directions[pair_id] + "/" + side + "/image");
+    EXPECT_EQ(
+        outputs[i].message.header.frame_id,
+        "orbvi/rectified/" + directions[pair_id] + "/" + side);
+    ASSERT_FALSE(outputs[i].message.data.empty());
+    EXPECT_EQ(outputs[i].message.data.front(), static_cast<std::uint8_t>(i));
+  }
+}
+
 TEST(OrbviRosBridgeCompressedImages, RectifiedBundleRoutesToDirectionTopics) {
   orbvi_sdk::OwnedFrame frame;
   frame.header.stream_id = orbvi_sdk::StreamId::RectifiedFisheye;
@@ -213,20 +270,20 @@ TEST(OrbviRosBridgeCompressedImages, RectifiedBundleRoutesToDirectionTopics) {
   EXPECT_TRUE(skipped_reason.empty());
   EXPECT_EQ(outputs[0].topic_suffix, "rectified/front/left/image/compressed");
   EXPECT_EQ(outputs[0].message.header.frame_id, "orbvi/rectified/front/left");
-  EXPECT_EQ(outputs[1].topic_suffix, "rectified/right/right/image/compressed");
-  EXPECT_EQ(outputs[1].message.header.frame_id, "orbvi/rectified/right/right");
+  EXPECT_EQ(outputs[1].topic_suffix, "rectified/front/right/image/compressed");
+  EXPECT_EQ(outputs[1].message.header.frame_id, "orbvi/rectified/front/right");
   EXPECT_EQ(outputs[2].topic_suffix, "rectified/right/left/image/compressed");
   EXPECT_EQ(outputs[2].message.header.frame_id, "orbvi/rectified/right/left");
-  EXPECT_EQ(outputs[3].topic_suffix, "rectified/rear/right/image/compressed");
-  EXPECT_EQ(outputs[3].message.header.frame_id, "orbvi/rectified/rear/right");
+  EXPECT_EQ(outputs[3].topic_suffix, "rectified/right/right/image/compressed");
+  EXPECT_EQ(outputs[3].message.header.frame_id, "orbvi/rectified/right/right");
   EXPECT_EQ(outputs[4].topic_suffix, "rectified/rear/left/image/compressed");
   EXPECT_EQ(outputs[4].message.header.frame_id, "orbvi/rectified/rear/left");
-  EXPECT_EQ(outputs[5].topic_suffix, "rectified/left/right/image/compressed");
-  EXPECT_EQ(outputs[5].message.header.frame_id, "orbvi/rectified/left/right");
+  EXPECT_EQ(outputs[5].topic_suffix, "rectified/rear/right/image/compressed");
+  EXPECT_EQ(outputs[5].message.header.frame_id, "orbvi/rectified/rear/right");
   EXPECT_EQ(outputs[6].topic_suffix, "rectified/left/left/image/compressed");
   EXPECT_EQ(outputs[6].message.header.frame_id, "orbvi/rectified/left/left");
-  EXPECT_EQ(outputs[7].topic_suffix, "rectified/front/right/image/compressed");
-  EXPECT_EQ(outputs[7].message.header.frame_id, "orbvi/rectified/front/right");
+  EXPECT_EQ(outputs[7].topic_suffix, "rectified/left/right/image/compressed");
+  EXPECT_EQ(outputs[7].message.header.frame_id, "orbvi/rectified/left/right");
   for (const auto& output : outputs) {
     EXPECT_FALSE(Contains(output.topic_suffix, "view_"));
     EXPECT_FALSE(Contains(output.message.header.frame_id, "pair_"));
@@ -403,6 +460,64 @@ TEST(OrbviRosBridgeDepthImages, VisualizationImageMatchesSourceDisparityJet) {
   ASSERT_EQ(image.data.size(), 9u);
   EXPECT_GT(image.data[0], image.data[2]);
   EXPECT_GT(image.data[8], image.data[6]);
+}
+
+TEST(OrbviRosBridgeDepthImages, SplitVisualizationCanOverlayFiveByFiveMetricGrid) {
+  orbvi_sdk::DepthMap depth;
+  depth.pixel_format = orbvi_sdk::DepthPixelFormat::Float32Meters;
+  depth.width = 100;
+  depth.height = 100;
+  depth.stride = depth.width * sizeof(float);
+  depth.frame_id = "orbvi/disparity/depth";
+  for (std::size_t index = 0; index < 10000; ++index) {
+    AppendFloat32(&depth.data, 2.5f);
+  }
+
+  orbvi_sdk::OwnedFrame disparity;
+  disparity.header.stream_id = orbvi_sdk::StreamId::Disparity;
+  disparity.header.format = orbvi_sdk::FrameFormat::Disparity32F;
+  disparity.header.compression = orbvi_sdk::Compression::None;
+  disparity.frame_id = "orbvi/disparity";
+  disparity.metadata["width"] = "100";
+  disparity.metadata["height"] = "100";
+  disparity.metadata["stride"] = "400";
+  for (std::size_t index = 0; index < 10000; ++index) {
+    AppendFloat32(&disparity.payload, 1.0f);
+  }
+
+  orbvi_sdk::DepthCalibration calibration;
+  calibration.width = 100;
+  calibration.height = 100;
+  calibration.tile_count = 1;
+  calibration.tile_width = 100;
+  calibration.tile_height = 100;
+  orbvi_sdk::DepthTileCalibration tile;
+  tile.tile_index = 0;
+  tile.width = 100;
+  tile.height = 100;
+  calibration.tiles.push_back(tile);
+
+  orbvi_ros_bridge::DepthVisualizationOptions plain_options;
+  plain_options.min_depth_m = 0.1;
+  plain_options.max_depth_m = 20.0;
+  const auto plain = orbvi_ros_bridge::MakeSplitDepthVisualizationImages(
+      depth.view(), disparity.view(), plain_options, calibration);
+  ASSERT_EQ(plain.size(), 1u);
+  EXPECT_EQ(plain[0].topic_suffix, "front/depth/viz");
+
+  auto grid_options = plain_options;
+  grid_options.show_grid_values = true;
+  const auto grid = orbvi_ros_bridge::MakeSplitDepthVisualizationImages(
+      depth.view(), disparity.view(), grid_options, calibration);
+  ASSERT_EQ(grid.size(), 1u);
+
+  const std::size_t grid_line_offset =
+      static_cast<std::size_t>(1) * grid[0].message.step + 16u * 3u;
+  ASSERT_LT(grid_line_offset + 2u, grid[0].message.data.size());
+  EXPECT_NE(plain[0].message.data[grid_line_offset + 0u], 255u);
+  EXPECT_EQ(grid[0].message.data[grid_line_offset + 0u], 255u);
+  EXPECT_EQ(grid[0].message.data[grid_line_offset + 1u], 255u);
+  EXPECT_EQ(grid[0].message.data[grid_line_offset + 2u], 255u);
 }
 
 TEST(OrbviRosBridgeDepthImages, PointCloudUsesDepthCalibration) {

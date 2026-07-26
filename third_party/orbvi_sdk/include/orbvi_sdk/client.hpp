@@ -47,6 +47,8 @@ struct StreamStatus {
   StreamId stream_id = StreamId::Unknown;
   FrameFormat format = FrameFormat::Unknown;
   std::string status;
+  std::string activity_state;
+  std::string source_status;
   std::string real_source_status;
   std::string blocked_reason;
   double target_rate_hz = 0.0;
@@ -81,6 +83,13 @@ struct StreamStatus {
   std::string invalid_value;
 };
 
+struct DataPlaneStatus {
+  std::string activity_state;
+  bool running = false;
+  std::uint64_t active_clients = 0;
+  std::vector<StreamId> active_streams;
+};
+
 struct DeviceCalibrationStatus {
   std::string status;
   std::string calibration_version;
@@ -106,6 +115,7 @@ struct DeferredCapabilityStatus {
 struct DeviceStatus {
   std::string state;
   std::uint64_t active_sessions = 0;
+  DataPlaneStatus data_plane;
   DeviceCalibrationStatus calibration;
   DeviceProcessStatus process;
   std::vector<DeferredCapabilityStatus> deferred_capabilities;

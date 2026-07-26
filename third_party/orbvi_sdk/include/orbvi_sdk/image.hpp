@@ -1,5 +1,6 @@
 #pragma once
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -34,6 +35,107 @@ struct DecodePolicy {
   OverflowPolicy on_overflow = OverflowPolicy::DropOldest;
   std::uint32_t max_decode_latency_ms = 100;
 };
+
+struct RectifiedImageIdentity {
+  std::uint32_t pair_id = 0;
+  std::string side;
+  std::string pair_direction;
+  std::string source_camera_direction;
+};
+
+inline std::string RectifiedPairDirection(std::uint32_t pair_id) {
+  static const char* const kPairDirections[] = {
+      "front",
+      "right",
+      "rear",
+      "left",
+  };
+  return pair_id < 4u ? kPairDirections[pair_id] : "";
+}
+
+inline std::string RectifiedSourceCameraDirection(
+    std::uint32_t pair_id,
+    const std::string& side) {
+  static const char* const kSourceDirections[] = {
+      "front",
+      "right",
+      "rear",
+      "left",
+      "front",
+  };
+  if (pair_id >= 4u) {
+    return "";
+  }
+  if (side == "left") {
+    return kSourceDirections[pair_id];
+  }
+  if (side == "right") {
+    return kSourceDirections[pair_id + 1u];
+  }
+  return "";
+}
+
+inline bool IsRectifiedDirectionValue(const std::string& direction) {
+  return direction == "front" ||
+         direction == "right" ||
+         direction == "rear" ||
+         direction == "left";
+}
+
+// pair_direction/source_camera_direction are additive ORBVI1 metadata. Frames
+// from older devices are accepted by deriving the same values from pair_id and
+// side. When present, the SDK Core metadata is authoritative.
+inline std::optional<RectifiedImageIdentity> ResolveRectifiedImageIdentity(
+    const MetadataMap& metadata,
+    const std::string& prefix = {}) {
+  const auto pair_it = metadata.find(prefix + "pair_id");
+  const auto side_it = metadata.find(prefix + "side");
+  if (pair_it == metadata.end() || side_it == metadata.end()) {
+    return std::nullopt;
+  }
+
+  std::uint32_t pair_id = 0;
+  const auto parsed = std::from_chars(
+      pair_it->second.data(),
+      pair_it->second.data() + pair_it->second.size(),
+      pair_id);
+  if (parsed.ec != std::errc{} ||
+      parsed.ptr != pair_it->second.data() + pair_it->second.size() ||
+      pair_id >= 4u ||
+      (side_it->second != "left" && side_it->second != "right")) {
+    return std::nullopt;
+  }
+
+  RectifiedImageIdentity identity;
+  identity.pair_id = pair_id;
+  identity.side = side_it->second;
+
+  const auto pair_direction_it =
+      metadata.find(prefix + "pair_direction");
+  if (pair_direction_it != metadata.end() &&
+      !pair_direction_it->second.empty() &&
+      !IsRectifiedDirectionValue(pair_direction_it->second)) {
+    return std::nullopt;
+  }
+  const auto source_direction_it =
+      metadata.find(prefix + "source_camera_direction");
+  if (source_direction_it != metadata.end() &&
+      !source_direction_it->second.empty() &&
+      !IsRectifiedDirectionValue(source_direction_it->second)) {
+    return std::nullopt;
+  }
+  identity.pair_direction =
+      pair_direction_it != metadata.end() &&
+              !pair_direction_it->second.empty()
+          ? pair_direction_it->second
+          : RectifiedPairDirection(pair_id);
+  identity.source_camera_direction =
+      source_direction_it != metadata.end() &&
+              !source_direction_it->second.empty()
+          ? source_direction_it->second
+          : RectifiedSourceCameraDirection(pair_id, identity.side);
+  return identity;
+}
 
 struct DecodedImageView {
   PixelFormat pixel_format = PixelFormat::Bgr888;

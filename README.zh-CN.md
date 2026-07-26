@@ -27,6 +27,10 @@ Host 侧全景和 VIO topic 的应用开发者。
 
 ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::msg` 命名空间。
 
+校正图 topic 的方向段读取 SDK Core 的 `pair_direction`：同一个 `pair_id` 的
+`left`、`right` 必须使用相同方向。`source_camera_direction` 继续表示物理相机
+来源，仅用于标定和诊断，不参与 topic 选择。
+
 | Topic | ROS1 类型 | 说明 |
 | --- | --- | --- |
 | `/orbvi/raw/camera_<id>/image` | `sensor_msgs/Image` | 开启 decoded 时发布的 BGR 图像 |

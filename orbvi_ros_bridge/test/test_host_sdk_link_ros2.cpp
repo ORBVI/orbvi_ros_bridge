@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -138,17 +139,21 @@ TEST(OrbviRosBridgeHostSdkLink, RigDepthPanoramaSymbolMatchesBundledHeaders) {
   EXPECT_FALSE(result);
 }
 
-TEST(OrbviRosBridgeDecodedImages, RectifiedPublicFrameIdRoutesToDirectionTopic) {
+TEST(OrbviRosBridgeDecodedImages, RectifiedCoreMetadataRoutesToPairDirectionTopic) {
   orbvi_sdk::OwnedDecodedImage decoded;
   decoded.width = 1;
   decoded.height = 1;
   decoded.stride = 3;
   decoded.timestamp_ns = 123456789;
-  decoded.frame_id = "orbvi/rectified/rear/right";
-  decoded.camera_id = "rear/right";
+  decoded.frame_id = "orbvi/rectified/left/right";
+  decoded.camera_id = "left/right";
   decoded.data = {1, 2, 3};
 
   orbvi_sdk::FrameDelivery delivery;
+  delivery.frame.metadata["pair_id"] = "2";
+  delivery.frame.metadata["side"] = "right";
+  delivery.frame.metadata["pair_direction"] = "rear";
+  delivery.frame.metadata["source_camera_direction"] = "left";
   delivery.decoded_image = decoded;
   delivery.decoded_images.push_back(decoded);
 
@@ -259,6 +264,11 @@ TEST(OrbviRosBridgeCompressedImages, RectifiedBundleRoutesToDirectionTopics) {
     frame.metadata[prefix + "timestamp_ns"] = "123456789";
     frame.metadata[prefix + "pair_id"] = std::to_string(i / 2);
     frame.metadata[prefix + "side"] = (i % 2 == 0) ? "left" : "right";
+    frame.metadata[prefix + "pair_direction"] =
+        std::array<const char*, 4>{"front", "right", "rear", "left"}[i / 2];
+    frame.metadata[prefix + "source_camera_direction"] =
+        std::array<const char*, 4>{"front", "right", "rear", "left"}[
+            (i / 2 + i % 2) % 4];
     frame.payload.push_back(static_cast<std::uint8_t>(i));
   }
 

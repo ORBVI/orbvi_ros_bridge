@@ -13,6 +13,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "orbvi_sdk/image.hpp"
+
 #include <boost/array.hpp>
 #include <livox_ros_driver2/CustomPoint.h>
 #include <opencv2/core.hpp>
@@ -324,44 +326,11 @@ bool NormalizeRectifiedSide(std::string side, std::string* out) {
   return false;
 }
 
-std::string RectifiedDirectionForPairSide(
-    std::uint32_t pair_id,
-    const std::string& side) {
-  static const char* const kPairDirections[] = {
-      "front",
-      "right",
-      "rear",
-      "left",
-  };
-  if (pair_id >= 4u || (side != "left" && side != "right")) {
-    return "";
-  }
-  // pair_id names the stereo viewing direction. The right image is sourced
-  // from the next physical fisheye around the rig, but it still belongs to
-  // the same directional stereo pair as the left image.
-  return kPairDirections[pair_id];
-}
-
 bool IsRectifiedDirection(const std::string& direction) {
   return direction == "front" ||
          direction == "right" ||
          direction == "rear" ||
          direction == "left";
-}
-
-std::string RectifiedTopicSuffix(
-    std::uint32_t pair_id,
-    const std::string& side,
-    const std::string& leaf) {
-  std::string normalized_side;
-  const std::string direction =
-      NormalizeRectifiedSide(side, &normalized_side)
-          ? RectifiedDirectionForPairSide(pair_id, normalized_side)
-          : "";
-  if (!direction.empty()) {
-    return "rectified/" + direction + "/" + normalized_side + "/" + leaf;
-  }
-  return "";
 }
 
 std::string RectifiedTopicSuffix(
@@ -377,20 +346,6 @@ std::string RectifiedTopicSuffix(
 }
 
 std::string RectifiedFrameId(
-    std::uint32_t pair_id,
-    const std::string& side) {
-  std::string normalized_side;
-  const std::string direction =
-      NormalizeRectifiedSide(side, &normalized_side)
-          ? RectifiedDirectionForPairSide(pair_id, normalized_side)
-          : "";
-  if (!direction.empty()) {
-    return "orbvi/rectified/" + direction + "/" + normalized_side;
-  }
-  return "";
-}
-
-std::string RectifiedFrameId(
     const std::string& direction,
     const std::string& side) {
   std::string normalized_side;
@@ -399,69 +354,6 @@ std::string RectifiedFrameId(
     return "";
   }
   return "orbvi/rectified/" + direction + "/" + normalized_side;
-}
-
-bool ResolveRectifiedPairSide(
-    const MetadataMap& metadata,
-    std::uint32_t* pair_id,
-    std::string* side) {
-  if (pair_id == nullptr || side == nullptr) {
-    return false;
-  }
-  if (ParseU32(MetadataValue(metadata, "pair_id"), pair_id) &&
-      NormalizeRectifiedSide(MetadataValue(metadata, "side"), side) &&
-      !RectifiedDirectionForPairSide(*pair_id, *side).empty()) {
-    return true;
-  }
-  return false;
-}
-
-bool ResolveDecodedRectifiedPairSide(
-    const orbvi_sdk::FrameDelivery& delivery,
-    std::size_t decoded_index,
-    std::uint32_t* pair_id,
-    std::string* side) {
-  if (pair_id == nullptr || side == nullptr) {
-    return false;
-  }
-  const MetadataMap& metadata = delivery.frame.metadata;
-  const std::string pair_key = RectifiedMetadataKey(decoded_index, "pair_id");
-  const std::string side_key = RectifiedMetadataKey(decoded_index, "side");
-  if (ParseU32(MetadataValue(metadata, pair_key), pair_id) &&
-      NormalizeRectifiedSide(MetadataValue(metadata, side_key), side) &&
-      !RectifiedDirectionForPairSide(*pair_id, *side).empty()) {
-    return true;
-  }
-  return ResolveRectifiedPairSide(metadata, pair_id, side);
-}
-
-bool ResolveRectifiedFrameId(
-    const std::string& frame_id,
-    std::string* direction,
-    std::string* side) {
-  if (direction == nullptr || side == nullptr) {
-    return false;
-  }
-  static const std::string kPrefix = "orbvi/rectified/";
-  if (frame_id.compare(0, kPrefix.size(), kPrefix) != 0) {
-    return false;
-  }
-  const std::string suffix = frame_id.substr(kPrefix.size());
-  const auto separator = suffix.find('/');
-  if (separator == std::string::npos || separator == 0 ||
-      separator + 1 >= suffix.size() ||
-      suffix.find('/', separator + 1) != std::string::npos) {
-    return false;
-  }
-  const std::string parsed_direction = suffix.substr(0, separator);
-  std::string parsed_side;
-  if (!IsRectifiedDirection(parsed_direction) ||
-      !NormalizeRectifiedSide(suffix.substr(separator + 1), &parsed_side)) {
-    return false;
-  }
-  *direction = parsed_direction;
-  *side = std::move(parsed_side);
-  return true;
 }
 
 std::string DisparityEncoding(
@@ -739,13 +631,15 @@ bool MakeSingleCompressedImage(
       out->topic_suffix = "raw/camera_" + camera_id + "/image/compressed";
     }
   } else if (frame.stream_id == orbvi_sdk::StreamId::RectifiedFisheye) {
-    std::uint32_t pair_id = 0;
-    std::string side;
-    if (!ResolveRectifiedPairSide(metadata, &pair_id, &side)) {
+    const auto identity =
+        orbvi_sdk::ResolveRectifiedImageIdentity(metadata);
+    if (!identity.has_value()) {
       return false;
     }
-    out->topic_suffix = RectifiedTopicSuffix(pair_id, side, "image/compressed");
-    out->message.header.frame_id = RectifiedFrameId(pair_id, side);
+    out->topic_suffix = RectifiedTopicSuffix(
+        identity->pair_direction, identity->side, "image/compressed");
+    out->message.header.frame_id =
+        RectifiedFrameId(identity->pair_direction, identity->side);
     if (out->topic_suffix.empty() || out->message.header.frame_id.empty()) {
       return false;
     }
@@ -1040,7 +934,8 @@ std::vector<ImageOutput> SplitVerticalTileImage(
   std::vector<ImageOutput> outputs;
   outputs.reserve(calibration.tiles.size());
   for (const auto& tile : calibration.tiles) {
-    const std::string direction = RectifiedDirectionForPairSide(tile.tile_index, "left");
+    const std::string direction =
+        orbvi_sdk::RectifiedPairDirection(tile.tile_index);
     if (direction.empty()) {
       continue;
     }
@@ -1214,13 +1109,15 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
       if (!SlicePayload(frame, offset, size, &output.message.data)) {
         continue;
       }
-      std::uint32_t pair_id = 0;
-      std::string side;
-      if (ParseU32(MetadataValue(metadata, RectifiedMetadataKey(i, "pair_id")), &pair_id) &&
-          NormalizeRectifiedSide(MetadataValue(metadata, RectifiedMetadataKey(i, "side")), &side) &&
-          !RectifiedDirectionForPairSide(pair_id, side).empty()) {
-        output.topic_suffix = RectifiedTopicSuffix(pair_id, side, "image/compressed");
-        output.message.header.frame_id = RectifiedFrameId(pair_id, side);
+      const auto identity = orbvi_sdk::ResolveRectifiedImageIdentity(
+          metadata, "rectified." + std::to_string(i) + ".");
+      if (identity.has_value()) {
+        output.topic_suffix = RectifiedTopicSuffix(
+            identity->pair_direction,
+            identity->side,
+            "image/compressed");
+        output.message.header.frame_id =
+            RectifiedFrameId(identity->pair_direction, identity->side);
       }
       if (output.topic_suffix.empty() || output.message.header.frame_id.empty()) {
         continue;
@@ -1258,16 +1155,19 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
     if (stream == orbvi_sdk::StreamId::RawFisheye) {
       output.topic_suffix = "raw/camera_" + token + "/image";
     } else {
-      std::string direction;
-      std::string side;
-      std::uint32_t pair_id = 0;
-      if (ResolveDecodedRectifiedPairSide(delivery, index, &pair_id, &side)) {
-        direction = RectifiedDirectionForPairSide(pair_id, side);
-      } else if (!ResolveRectifiedFrameId(decoded.frame_id, &direction, &side)) {
+      const std::string prefix =
+          delivery.decoded_images.size() > 1u
+              ? "rectified." + std::to_string(index) + "."
+              : "";
+      const auto identity = orbvi_sdk::ResolveRectifiedImageIdentity(
+          delivery.frame.metadata, prefix);
+      if (!identity.has_value()) {
         return;
       }
-      output.topic_suffix = RectifiedTopicSuffix(direction, side, "image");
-      output.message.header.frame_id = RectifiedFrameId(direction, side);
+      output.topic_suffix = RectifiedTopicSuffix(
+          identity->pair_direction, identity->side, "image");
+      output.message.header.frame_id =
+          RectifiedFrameId(identity->pair_direction, identity->side);
       if (output.topic_suffix.empty() || output.message.header.frame_id.empty()) {
         return;
       }

@@ -29,6 +29,11 @@ The repository includes:
 ROS1 and ROS2 use the same topic names. ROS2 message packages use the matching
 `::msg` namespaces.
 
+For rectified topics, the direction path component is the SDK Core
+`pair_direction`: both `left` and `right` images in one `pair_id` therefore use
+the same direction. `source_camera_direction` remains physical-source metadata
+for calibration and diagnostics and does not select the topic.
+
 | Topic | ROS1 type | Notes |
 | --- | --- | --- |
 | `/orbvi/raw/camera_<id>/image` | `sensor_msgs/Image` | Decoded BGR image when enabled |

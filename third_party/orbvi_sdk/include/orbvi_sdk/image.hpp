@@ -110,30 +110,30 @@ inline std::optional<RectifiedImageIdentity> ResolveRectifiedImageIdentity(
   identity.pair_id = pair_id;
   identity.side = side_it->second;
 
+  const std::string expected_pair_direction =
+      RectifiedPairDirection(pair_id);
   const auto pair_direction_it =
       metadata.find(prefix + "pair_direction");
   if (pair_direction_it != metadata.end() &&
-      !pair_direction_it->second.empty() &&
-      !IsRectifiedDirectionValue(pair_direction_it->second)) {
+      pair_direction_it->second != expected_pair_direction) {
     return std::nullopt;
   }
+  const std::string expected_source_direction =
+      RectifiedSourceCameraDirection(pair_id, identity.side);
   const auto source_direction_it =
       metadata.find(prefix + "source_camera_direction");
   if (source_direction_it != metadata.end() &&
-      !source_direction_it->second.empty() &&
-      !IsRectifiedDirectionValue(source_direction_it->second)) {
+      source_direction_it->second != expected_source_direction) {
     return std::nullopt;
   }
   identity.pair_direction =
-      pair_direction_it != metadata.end() &&
-              !pair_direction_it->second.empty()
+      pair_direction_it != metadata.end()
           ? pair_direction_it->second
-          : RectifiedPairDirection(pair_id);
+          : expected_pair_direction;
   identity.source_camera_direction =
-      source_direction_it != metadata.end() &&
-              !source_direction_it->second.empty()
+      source_direction_it != metadata.end()
           ? source_direction_it->second
-          : RectifiedSourceCameraDirection(pair_id, identity.side);
+          : expected_source_direction;
   return identity;
 }
 

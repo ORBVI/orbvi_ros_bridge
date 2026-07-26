@@ -335,6 +335,27 @@ TEST(OrbviRosBridgeCompressedImages, SingleRectifiedFrameRequiresPairSideMetadat
   EXPECT_TRUE(outputs.empty());
 }
 
+TEST(OrbviRosBridgeCompressedImages, RejectsContradictoryCoreDirectionMetadata) {
+  orbvi_sdk::OwnedFrame frame;
+  frame.header.stream_id = orbvi_sdk::StreamId::RectifiedFisheye;
+  frame.header.format = orbvi_sdk::FrameFormat::RectifiedMjpeg;
+  frame.header.compression = orbvi_sdk::Compression::Jpeg;
+  frame.header.timestamp_ns = 123456789;
+  frame.frame_id = "orbvi/rectified/front/right";
+  frame.metadata["pair_id"] = "0";
+  frame.metadata["side"] = "right";
+  frame.metadata["pair_direction"] = "rear";
+  frame.metadata["source_camera_direction"] = "right";
+  frame.payload = {0xFF, 0xD8, 0xFF, 0xD9};
+
+  std::string skipped_reason;
+  const auto outputs =
+      orbvi_ros_bridge::MakeCompressedImageMessages(
+          frame.view(), true, &skipped_reason);
+
+  EXPECT_TRUE(outputs.empty());
+}
+
 TEST(OrbviRosBridgeCompressedImages, InvalidSingleRectifiedFrameDoesNotPublishInternalTopic) {
   orbvi_sdk::OwnedFrame frame;
   frame.header.stream_id = orbvi_sdk::StreamId::RectifiedFisheye;

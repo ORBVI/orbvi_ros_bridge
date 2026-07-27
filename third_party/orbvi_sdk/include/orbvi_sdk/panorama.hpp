@@ -173,6 +173,10 @@ using PanoramaDepthProvider =
     std::function<std::shared_ptr<const RigDepthPanorama>(std::uint64_t)>;
 
 struct PanoramaSubscribeOptions {
+  // Production subscriptions consume the already-stitched board
+  // pano_display_stream. `stitch.width/height` are the expected wire geometry;
+  // the remaining stitch fields are retained for source compatibility and are
+  // used only by the offline GeneratePanorama helpers.
   PanoramaStitchOptions stitch;
   double target_output_rate_hz = 10.0;
   std::uint32_t source_frame_stride = 2;

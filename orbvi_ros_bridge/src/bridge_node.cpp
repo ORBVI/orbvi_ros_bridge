@@ -51,6 +51,9 @@ struct BridgeConfig {
   bool publish_panorama = false;
   bool panorama_align_to_depth = true;
   bool publish_lidar_pcl = false;
+  bool publish_vio_path = true;
+  std::size_t vio_path_max_poses = 2000;
+  double vio_path_publish_rate_hz = 10.0;
   orbvi_sdk::DepthGenerationOptions depth_options;
   DepthVisualizationOptions depth_visualization_options;
   orbvi_sdk::PointCloudGenerationOptions pointcloud_options;
@@ -260,6 +263,11 @@ class BridgeNode::Impl {
       std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
       panorama_depth_frames_.clear();
     }
+    {
+      std::lock_guard<std::mutex> lock(vio_path_mutex_);
+      vio_path_ = nav_msgs::Path();
+      last_vio_path_publish_time_ = std::chrono::steady_clock::time_point();
+    }
     orbvi_sdk::ClientOptions options;
     options.host = config_.host;
     options.control_port = config_.control_port;
@@ -293,6 +301,12 @@ class BridgeNode::Impl {
     ROS_INFO_STREAM(
         "orbvi_ros_bridge started with Host SDK " << ORBVI_ROS_BRIDGE_HOST_SDK_LINKAGE
         << " library, host=" << config_.host << ":" << config_.control_port);
+    if (config_.publish_vio_path) {
+      ROS_INFO_STREAM(
+          "VIO path enabled on " << JoinTopic(config_.topic_prefix, "vio/path")
+          << ", max_poses=" << config_.vio_path_max_poses
+          << ", max_publish_rate_hz=" << config_.vio_path_publish_rate_hz);
+    }
     return true;
   }
 
@@ -304,6 +318,11 @@ class BridgeNode::Impl {
     {
       std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
       panorama_depth_frames_.clear();
+    }
+    {
+      std::lock_guard<std::mutex> lock(vio_path_mutex_);
+      vio_path_ = nav_msgs::Path();
+      last_vio_path_publish_time_ = std::chrono::steady_clock::time_point();
     }
     for (auto& handle : subscriptions_) {
       handle.stop();
@@ -447,6 +466,26 @@ class BridgeNode::Impl {
         "publish_lidar_pcl",
         config.publish_lidar_pcl,
         config.publish_lidar_pcl);
+    private_node_.param<bool>(
+        "publish_vio_path",
+        config.publish_vio_path,
+        config.publish_vio_path);
+    int vio_path_max_poses = static_cast<int>(config.vio_path_max_poses);
+    private_node_.param<int>(
+        "vio_path_max_poses",
+        vio_path_max_poses,
+        vio_path_max_poses);
+    config.vio_path_max_poses =
+        vio_path_max_poses <= 0 ? 1u : static_cast<std::size_t>(vio_path_max_poses);
+    private_node_.param<double>(
+        "vio_path_publish_rate_hz",
+        config.vio_path_publish_rate_hz,
+        config.vio_path_publish_rate_hz);
+    if (!std::isfinite(config.vio_path_publish_rate_hz) ||
+        config.vio_path_publish_rate_hz < 0.0) {
+      ROS_WARN("Invalid vio_path_publish_rate_hz; using 10 Hz");
+      config.vio_path_publish_rate_hz = 10.0;
+    }
     if (config.publish_panorama && config.panorama_options.stitch.depth_assist &&
         !HasStream(config.streams, orbvi_sdk::StreamId::Disparity)) {
       config.streams.push_back(orbvi_sdk::StreamId::Disparity);
@@ -1538,6 +1577,37 @@ class BridgeNode::Impl {
       return;
     }
     Publisher<nav_msgs::Odometry>(JoinTopic(config_.topic_prefix, suffix)).publish(message);
+    if (!config_.publish_vio_path || suffix != "vio/odometry") {
+      return;
+    }
+
+    nav_msgs::Path path_message;
+    {
+      std::lock_guard<std::mutex> lock(vio_path_mutex_);
+      if (!AppendVioOdometryToPath(
+              message,
+              config_.vio_path_max_poses,
+              &vio_path_)) {
+        ROS_WARN_THROTTLE(5.0, "Failed to append optimized VIO odometry to Path");
+        return;
+      }
+      const auto now = std::chrono::steady_clock::now();
+      const bool rate_unlimited = config_.vio_path_publish_rate_hz <= 0.0;
+      const bool first_publish =
+          last_vio_path_publish_time_ == std::chrono::steady_clock::time_point();
+      if (!rate_unlimited && !first_publish) {
+        const auto publish_period =
+            std::chrono::duration<double>(
+                1.0 / config_.vio_path_publish_rate_hz);
+        if (now - last_vio_path_publish_time_ < publish_period) {
+          return;
+        }
+      }
+      last_vio_path_publish_time_ = now;
+      path_message = vio_path_;
+    }
+    Publisher<nav_msgs::Path>(JoinTopic(config_.topic_prefix, "vio/path"))
+        .publish(path_message);
   }
 
   ros::NodeHandle node_;
@@ -1562,6 +1632,9 @@ class BridgeNode::Impl {
   std::thread depth_derived_worker_;
   bool depth_derived_stop_ = false;
   bool depth_derived_pending_ = false;
+  std::mutex vio_path_mutex_;
+  nav_msgs::Path vio_path_;
+  std::chrono::steady_clock::time_point last_vio_path_publish_time_;
   std::mutex publishers_mutex_;
   std::map<std::string, ros::Publisher> publishers_;
 };

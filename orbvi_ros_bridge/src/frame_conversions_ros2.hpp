@@ -5,8 +5,10 @@
 #include <string>
 #include <vector>
 
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -123,5 +125,9 @@ bool MakeLivoxPointCloud2(
     const livox_ros_driver2::msg::CustomMsg& msg,
     sensor_msgs::msg::PointCloud2* out);
 bool MakeVioOdometry(const orbvi_sdk::FrameView& frame, nav_msgs::msg::Odometry* out);
+bool AppendVioOdometryToPath(
+    const nav_msgs::msg::Odometry& odometry,
+    std::size_t max_poses,
+    nav_msgs::msg::Path* path);
 
 }  // namespace orbvi_ros_bridge

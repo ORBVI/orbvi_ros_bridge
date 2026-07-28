@@ -28,6 +28,9 @@ USER_ARGUMENT_DEFAULTS = {
     "host": "127.0.0.1",
     "publish_lidar_pcl": "false",
     "depth_viz_show_grid_values": "false",
+    "publish_vio_path": "true",
+    "vio_path_max_poses": "2000",
+    "vio_path_publish_rate_hz": "10.0",
 }
 
 PANORAMA_ARGUMENT_DEFAULTS = {
@@ -143,6 +146,18 @@ class LaunchContractTest(unittest.TestCase):
                     ros1_param_value(path, "depth_viz_show_grid_values"),
                     "$(arg depth_viz_show_grid_values)",
                 )
+                self.assertEqual(
+                    ros1_param_value(path, "publish_vio_path"),
+                    "$(arg publish_vio_path)",
+                )
+                self.assertEqual(
+                    ros1_param_value(path, "vio_path_max_poses"),
+                    "$(arg vio_path_max_poses)",
+                )
+                self.assertEqual(
+                    ros1_param_value(path, "vio_path_publish_rate_hz"),
+                    "$(arg vio_path_publish_rate_hz)",
+                )
                 self.assertNotIn("pano", VISUAL_STREAMS.split(","))
                 self.assertIn("pano", PANO_STREAMS.split(","))
 
@@ -160,6 +175,18 @@ class LaunchContractTest(unittest.TestCase):
                 self.assertIn("LaunchConfiguration(\"host\")", source)
                 self.assertIn(
                     "LaunchConfiguration(\n        \"depth_viz_show_grid_values\")",
+                    source,
+                )
+                self.assertIn(
+                    "LaunchConfiguration(\"publish_vio_path\")",
+                    source,
+                )
+                self.assertIn(
+                    "LaunchConfiguration(\"vio_path_max_poses\")",
+                    source,
+                )
+                self.assertIn(
+                    "LaunchConfiguration(\n        \"vio_path_publish_rate_hz\")",
                     source,
                 )
 
@@ -196,6 +223,25 @@ class LaunchContractTest(unittest.TestCase):
             with self.subTest(config_name=config_name):
                 values = yaml_scalar_defaults(PACKAGE_ROOT / "config" / config_name)
                 self.assertEqual(values["pano_align_to_depth"], "true")
+
+    def test_rviz_configs_include_vio_path_display(self):
+        configs = {
+            "rviz-config.rviz": (
+                "Class: rviz/Path",
+                "Topic: /orbvi/vio/path",
+            ),
+            "rviz-config-ros2.rviz": (
+                "Class: rviz_default_plugins/Path",
+                "Value: /orbvi/vio/path",
+            ),
+        }
+        for config_name, expectations in configs.items():
+            with self.subTest(config_name=config_name):
+                source = (
+                    PACKAGE_ROOT / "visuallize_config" / config_name
+                ).read_text(encoding="utf-8")
+                for expected in expectations:
+                    self.assertIn(expected, source)
 
 
 if __name__ == "__main__":

@@ -48,6 +48,7 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 | `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | 全景深度可视化图 |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | 深度生成的点云 |
 | `/orbvi/vio/odometry` | `nav_msgs/Odometry` | 优化后的 VIO 位姿 |
+| `/orbvi/vio/path` | `nav_msgs/Path` | 由优化后的 VIO 位姿累计得到的有界轨迹 |
 | `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU 预测的 VIO 位姿 |
 
 矫正图中的方位表示双目对的观察方向，不表示原始鱼眼相机本身。八路图像固定按
@@ -271,8 +272,17 @@ scripts/orbvi_ros_bridge_rate_check.sh \
 | `host` | `127.0.0.1` | ORBVI 设备 IP 或 hostname |
 | `publish_lidar_pcl` | `false` | 额外将 Livox `CustomMsg` 转换并发布到 `/orbvi/lidar/points` |
 | `depth_viz_show_grid_values` | `false` | 在每路方向深度可视化图上绘制 5×5 网格及网格交点米制深度值 |
+| `publish_vio_path` | `true` | 将优化后的 `/orbvi/vio/odometry` 累计并发布到 `/orbvi/vio/path` |
+| `vio_path_max_poses` | `2000` | Path 中保留的最大 Pose 数；小于等于 0 时按 1 处理 |
+| `vio_path_publish_rate_hz` | `10.0` | Path 最大发布频率；设为 0 时随每条优化 odometry 发布 |
 
 Topic 名称固定在 `/orbvi` 下。
+
+`/orbvi/vio/path` 不使用 `/orbvi/vio/imu_prediction`。每个 Pose 沿用优化 odometry
+的坐标系、时间戳和位姿；坐标系变化或时间戳回退时自动清空旧轨迹。默认最多保留
+2000 个 Pose，内存和单条消息大小均为 `O(vio_path_max_poses)`，整条 Path 默认最多
+发布 10 Hz。高频或低带宽场景可调小点数或频率上限，或设置
+`publish_vio_path:=false` 关闭。
 
 ## 查看数据
 
@@ -288,11 +298,16 @@ ROS2 图像：
 ros2 run rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
 ```
 
-点云和里程计可在 RViz 中查看：
+点云、里程计和轨迹可在 RViz 中查看：
 
 - `/orbvi/lidar/custom`
 - `/orbvi/depth/points`
 - `/orbvi/vio/odometry`
+- `/orbvi/vio/path`
+
+仓库自带的 ROS1/ROS2 RViz 配置已预置 `VIO Path` display。若轨迹存在但不可见，
+将 RViz 的 `Fixed Frame` 设置为 `/orbvi/vio/odometry.header.frame_id` 的实际值
+（设备当前通常为 `world`）。
 
 ## FAQ
 

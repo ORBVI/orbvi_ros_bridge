@@ -1904,4 +1904,39 @@ bool MakeVioOdometry(const orbvi_sdk::FrameView& frame, nav_msgs::msg::Odometry*
          ReadPodArray(frame.payload_data, frame.payload_size, &offset, &out->twist.covariance);
 }
 
+bool AppendVioOdometryToPath(
+    const nav_msgs::msg::Odometry& odometry,
+    std::size_t max_poses,
+    nav_msgs::msg::Path* path) {
+  if (path == nullptr || max_poses == 0u || odometry.header.frame_id.empty()) {
+    return false;
+  }
+
+  const auto& current_stamp = odometry.header.stamp;
+  const bool frame_changed =
+      !path->header.frame_id.empty() &&
+      path->header.frame_id != odometry.header.frame_id;
+  const bool timestamp_rolled_back =
+      !path->poses.empty() &&
+      (current_stamp.sec < path->poses.back().header.stamp.sec ||
+       (current_stamp.sec == path->poses.back().header.stamp.sec &&
+        current_stamp.nanosec < path->poses.back().header.stamp.nanosec));
+  if (frame_changed || timestamp_rolled_back) {
+    path->poses.clear();
+  }
+
+  geometry_msgs::msg::PoseStamped pose;
+  pose.header = odometry.header;
+  pose.pose = odometry.pose.pose;
+  path->header = odometry.header;
+  path->poses.push_back(std::move(pose));
+  if (path->poses.size() > max_poses) {
+    path->poses.erase(
+        path->poses.begin(),
+        path->poses.begin() +
+            static_cast<std::ptrdiff_t>(path->poses.size() - max_poses));
+  }
+  return true;
+}
+
 }  // namespace orbvi_ros_bridge

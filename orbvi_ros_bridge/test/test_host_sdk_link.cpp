@@ -390,6 +390,41 @@ TEST(OrbviRosBridgeVio, RoutesOptimizedAndPropagatedSourcesToSeparateTopics) {
   EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
 }
 
+TEST(OrbviRosBridgeVio, BuildsBoundedPathAndResetsOnDiscontinuity) {
+  nav_msgs::Path path;
+  nav_msgs::Odometry odometry;
+  odometry.header.frame_id = "map";
+  odometry.pose.pose.orientation.w = 1.0;
+
+  for (std::uint32_t index = 0; index < 5u; ++index) {
+    odometry.header.stamp = ros::Time(index + 1u, 0u);
+    odometry.pose.pose.position.x = static_cast<double>(index);
+    ASSERT_TRUE(orbvi_ros_bridge::AppendVioOdometryToPath(
+        odometry, 3u, &path));
+  }
+
+  ASSERT_EQ(path.poses.size(), 3u);
+  EXPECT_EQ(path.header.frame_id, "map");
+  EXPECT_DOUBLE_EQ(path.poses.front().pose.position.x, 2.0);
+  EXPECT_DOUBLE_EQ(path.poses.back().pose.position.x, 4.0);
+
+  odometry.header.frame_id = "map_reset";
+  odometry.header.stamp = ros::Time(1u, 0u);
+  odometry.pose.pose.position.x = 10.0;
+  ASSERT_TRUE(orbvi_ros_bridge::AppendVioOdometryToPath(
+      odometry, 3u, &path));
+  ASSERT_EQ(path.poses.size(), 1u);
+  EXPECT_EQ(path.header.frame_id, "map_reset");
+  EXPECT_DOUBLE_EQ(path.poses.front().pose.position.x, 10.0);
+
+  odometry.header.stamp = ros::Time(0u, 0u);
+  odometry.pose.pose.position.x = 11.0;
+  ASSERT_TRUE(orbvi_ros_bridge::AppendVioOdometryToPath(
+      odometry, 3u, &path));
+  ASSERT_EQ(path.poses.size(), 1u);
+  EXPECT_DOUBLE_EQ(path.poses.front().pose.position.x, 11.0);
+}
+
 TEST(OrbviRosBridgeDepthImages, Float32MetersMapsToRosImage) {
   orbvi_sdk::DepthMap depth;
   depth.pixel_format = orbvi_sdk::DepthPixelFormat::Float32Meters;

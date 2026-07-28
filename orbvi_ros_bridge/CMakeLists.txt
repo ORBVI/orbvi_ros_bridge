@@ -174,13 +174,14 @@ endif()
 if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
   find_package(catkin REQUIRED COMPONENTS
     roscpp
+    geometry_msgs
     sensor_msgs
     nav_msgs
     livox_ros_driver2
   )
 
   catkin_package(
-    CATKIN_DEPENDS roscpp sensor_msgs nav_msgs livox_ros_driver2
+    CATKIN_DEPENDS roscpp geometry_msgs sensor_msgs nav_msgs livox_ros_driver2
   )
 
   add_library(orbvi_ros_bridge
@@ -264,6 +265,7 @@ else()
   find_package(ament_cmake REQUIRED)
   find_package(rclcpp REQUIRED)
   find_package(std_msgs REQUIRED)
+  find_package(geometry_msgs REQUIRED)
   find_package(sensor_msgs REQUIRED)
   find_package(nav_msgs REQUIRED)
   find_package(livox_ros_driver2 REQUIRED)
@@ -285,6 +287,7 @@ else()
   ament_target_dependencies(orbvi_ros_bridge
     rclcpp
     std_msgs
+    geometry_msgs
     sensor_msgs
     nav_msgs
     livox_ros_driver2
@@ -338,6 +341,7 @@ else()
     ament_target_dependencies(test_orbvi_ros_bridge_host_sdk_link_ros2
       rclcpp
       std_msgs
+      geometry_msgs
       sensor_msgs
       nav_msgs
       livox_ros_driver2

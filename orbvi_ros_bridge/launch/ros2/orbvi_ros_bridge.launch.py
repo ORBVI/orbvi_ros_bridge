@@ -9,6 +9,9 @@ ARGUMENT_DEFAULTS = {
     "host": "127.0.0.1",
     "publish_lidar_pcl": "false",
     "depth_viz_show_grid_values": "false",
+    "publish_vio_path": "true",
+    "vio_path_max_poses": "2000",
+    "vio_path_publish_rate_hz": "10.0",
 }
 
 DEFAULT_BRIDGE_PARAMETERS = {
@@ -32,6 +35,15 @@ def bridge_launch_description(parameters, extra_parameter_files=None):
         DeclareLaunchArgument(
             "depth_viz_show_grid_values",
             default_value=ARGUMENT_DEFAULTS["depth_viz_show_grid_values"]),
+        DeclareLaunchArgument(
+            "publish_vio_path",
+            default_value=ARGUMENT_DEFAULTS["publish_vio_path"]),
+        DeclareLaunchArgument(
+            "vio_path_max_poses",
+            default_value=ARGUMENT_DEFAULTS["vio_path_max_poses"]),
+        DeclareLaunchArgument(
+            "vio_path_publish_rate_hz",
+            default_value=ARGUMENT_DEFAULTS["vio_path_publish_rate_hz"]),
         SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_fastrtps_cpp"),
         SetEnvironmentVariable(name="FASTRTPS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile),
         SetEnvironmentVariable(name="FASTDDS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile),
@@ -52,4 +64,8 @@ def generate_launch_description():
     parameters["publish_lidar_pcl"] = LaunchConfiguration("publish_lidar_pcl")
     parameters["depth_viz_show_grid_values"] = LaunchConfiguration(
         "depth_viz_show_grid_values")
+    parameters["publish_vio_path"] = LaunchConfiguration("publish_vio_path")
+    parameters["vio_path_max_poses"] = LaunchConfiguration("vio_path_max_poses")
+    parameters["vio_path_publish_rate_hz"] = LaunchConfiguration(
+        "vio_path_publish_rate_hz")
     return bridge_launch_description(parameters)

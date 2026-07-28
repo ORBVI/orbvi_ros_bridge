@@ -51,6 +51,7 @@ for calibration and diagnostics and does not select the topic.
 | `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | Depth-panorama visualization |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | Depth-derived point cloud |
 | `/orbvi/vio/odometry` | `nav_msgs/Odometry` | Optimized VIO pose |
+| `/orbvi/vio/path` | `nav_msgs/Path` | Bounded trajectory accumulated from optimized VIO poses |
 | `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU-propagated VIO pose |
 
 The rectified direction names the stereo pair's viewing direction, not the
@@ -289,8 +290,18 @@ Stream selection and reference settings are kept inside the launch file.
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
 | `publish_lidar_pcl` | `false` | Also convert Livox `CustomMsg` to `/orbvi/lidar/points` |
 | `depth_viz_show_grid_values` | `false` | Draw a 5x5 grid and metric grid-point values on each directional depth visualization |
+| `publish_vio_path` | `true` | Accumulate optimized `/orbvi/vio/odometry` and publish `/orbvi/vio/path` |
+| `vio_path_max_poses` | `2000` | Maximum poses retained in the Path; values at or below zero are clamped to 1 |
+| `vio_path_publish_rate_hz` | `10.0` | Maximum Path publication rate; zero publishes every optimized odometry update |
 
 Topic names are fixed under `/orbvi`.
+
+`/orbvi/vio/path` does not consume `/orbvi/vio/imu_prediction`. Each pose keeps
+the optimized odometry frame, timestamp, and pose. The history resets when the
+frame changes or timestamps roll back. Memory and message size are bounded to
+`O(vio_path_max_poses)`, and the complete Path is published at no more than
+10 Hz by default. Reduce the pose or rate limit for high-rate or low-bandwidth
+links, or set `publish_vio_path:=false` to disable the output.
 
 ## View Data
 
@@ -306,11 +317,17 @@ ROS2 images:
 ros2 run rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
 ```
 
-Point clouds and odometry can be viewed in RViz:
+Point clouds, odometry, and the trajectory can be viewed in RViz:
 
 - `/orbvi/lidar/custom`
 - `/orbvi/depth/points`
 - `/orbvi/vio/odometry`
+- `/orbvi/vio/path`
+
+The bundled ROS1 and ROS2 RViz configurations include a `VIO Path` display.
+If the topic is active but the trajectory is not visible, set RViz `Fixed
+Frame` to the actual `/orbvi/vio/odometry.header.frame_id` value (normally
+`world` on the device).
 
 ## FAQ
 

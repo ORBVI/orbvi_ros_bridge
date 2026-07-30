@@ -9,7 +9,6 @@ pano_crop_bottom: 200
 
 pano_fov_half_deg: 95.0
 # 以深度全景的 [0, 2*pi) 方位约定发布 RGB，关闭后恢复 SDK 原始布局。
-pano_align_to_depth: true
 pano_stitching_radius_m: 2.0
 
 # 深度辅助目前只支持 fixed seam + MultiBand ROI

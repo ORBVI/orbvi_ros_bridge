@@ -2,6 +2,7 @@
   <!-- Panorama entry: visual topics plus Host SDK panorama. -->
   <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
   <arg name="publish_lidar_pcl" default="false" doc="Publish Livox CustomMsg as sensor_msgs/PointCloud2 on topic_prefix/lidar/points"/>
+  <arg name="publish_ipm" default="false" doc="Publish four-camera 360-degree ground-plane BEV on topic_prefix/ipm/image"/>
   <arg name="depth_viz_show_grid_values" default="false" doc="Draw a 5x5 grid with metric depth values on each directional depth visualization"/>
   <arg name="publish_vio_path" default="true" doc="Publish bounded optimized VIO trajectory on topic_prefix/vio/path"/>
   <arg name="vio_path_max_poses" default="2000" doc="Maximum number of poses retained in the VIO Path message"/>
@@ -10,6 +11,7 @@
   <node pkg="orbvi_ros_bridge" type="orbvi_ros_bridge_node" name="orbvi_ros_bridge" output="screen">
     <param name="host" value="$(arg host)"/>
     <param name="publish_lidar_pcl" value="$(arg publish_lidar_pcl)"/>
+    <param name="publish_ipm" value="$(arg publish_ipm)"/>
     <param name="depth_viz_show_grid_values" value="$(arg depth_viz_show_grid_values)"/>
     <param name="publish_vio_path" value="$(arg publish_vio_path)"/>
     <param name="vio_path_max_poses" value="$(arg vio_path_max_poses)"/>

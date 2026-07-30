@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -34,24 +35,6 @@ struct DepthVisualizationOptions {
   std::uint32_t pointcloud_stride = 4;
 };
 
-struct DepthPanoramaSample {
-  std::int32_t tile_index = -1;
-  std::uint32_t x = 0;
-  std::uint32_t y = 0;
-  float range_scale = 0.0f;
-};
-
-struct DepthPanoramaLookup {
-  std::uint32_t width = 0;
-  std::uint32_t height = 0;
-  std::uint32_t full_height = 0;
-  std::uint32_t crop_top = 0;
-  std::uint32_t crop_bottom = 0;
-  std::string calibration_version;
-  std::string calibration_hash;
-  std::vector<DepthPanoramaSample> samples;
-};
-
 std::vector<std::string> SplitCsv(const std::string& value);
 std::string NormalizeTopicPrefix(std::string prefix);
 std::string JoinTopic(const std::string& prefix, std::string suffix);
@@ -69,8 +52,7 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
     const orbvi_sdk::FrameDelivery& delivery);
 bool MakePanoramaImageMessage(
     const orbvi_sdk::PanoramaImageView& panorama,
-    sensor_msgs::Image* out,
-    bool align_to_depth_azimuth = false);
+    sensor_msgs::Image* out);
 
 bool MakeDisparityImage(const orbvi_sdk::FrameView& frame, sensor_msgs::Image* out);
 std::vector<ImageOutput> MakeSplitDisparityImages(
@@ -82,12 +64,16 @@ std::vector<ImageOutput> MakeSplitDepthImages(
     const orbvi_sdk::DepthCalibration& calibration);
 bool BuildDepthPanoramaLookup(
     const orbvi_sdk::DepthCalibration& calibration,
-    DepthPanoramaLookup* out,
+    orbvi_sdk::DepthPanoramaLookup* out,
     std::string* error);
 bool MakeDepthPanoramaImage(
     const orbvi_sdk::FrameView& disparity_frame,
     const orbvi_sdk::DepthCalibration& calibration,
-    const DepthPanoramaLookup& lookup,
+    const orbvi_sdk::DepthPanoramaLookup& lookup,
+    sensor_msgs::Image* out,
+    std::string* error);
+bool MakeDepthPanoramaImage(
+    const orbvi_sdk::RigDepthPanorama& depth,
     sensor_msgs::Image* out,
     std::string* error);
 bool MakeDepthPanoramaVisualizationImage(

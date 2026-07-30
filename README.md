@@ -41,15 +41,16 @@ for calibration and diagnostics and does not select the topic.
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | Decoded rectified image when enabled |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | Rectified stereo pair compressed image transport |
 | `/orbvi/pano/image` | `sensor_msgs/Image` | Host SDK panorama stitched from `raw_fisheye_stream` when `pano` is enabled |
+| `/orbvi/ipm/image` | `sensor_msgs/Image` | Four-fisheye 360-degree ground-plane BEV in `bgr8` |
 | `/orbvi/imu` | `sensor_msgs/Imu` | Device IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 point cloud stream |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU stream |
 | `/orbvi/disparity` | `sensor_msgs/Image` | Disparity image |
 | `/orbvi/depth` | `sensor_msgs/Image` | Generated depth image |
 | `/orbvi/<front\|right\|rear\|left>/depth/viz` | `sensor_msgs/Image` | Directional depth visualization; optionally includes a 5x5 metric grid |
-| `/orbvi/depth/panorama` | `sensor_msgs/Image` | `32FC1` spherical range derived from four disparity tiles |
+| `/orbvi/depth/panorama` | `sensor_msgs/Image` | `32FC1` spherical range generated after transforming all four stereo depth tiles by their full rig poses (rotation and translation) |
 | `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | Depth-panorama visualization |
-| `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | Depth-derived point cloud |
+| `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | Depth-derived point cloud; the default `ros` output frame applies each stereo pair's full rig pose |
 | `/orbvi/vio/odometry` | `nav_msgs/Odometry` | Optimized VIO pose |
 | `/orbvi/vio/path` | `nav_msgs/Path` | Bounded trajectory accumulated from optimized VIO poses |
 | `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU-propagated VIO pose |
@@ -141,6 +142,22 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
 
+Enable the four-fisheye 360-degree IPM:
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> publish_ipm:=true
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> publish_ipm:=true
+```
+
+IPM assumes four horizontal cameras at 1.0 m above the ground, facing front,
+right, rear and left. In the `base_link` output, image top is vehicle-forward
+and image left is vehicle-left. Defaults cover 20 m x 20 m at 0.02 m/pixel,
+producing 1000x1000 BGR at up to 5 Hz. TS-fisheye maps and seam weights are
+precomputed and applied inside `liborbvi_sdk`; the Bridge only handles ROS
+parameters, rate limiting and image publication.
+
 To draw a 5x5 grid and the depth at every grid intersection on all four
 directional depth visualizations, enable `depth_viz_show_grid_values`:
 
@@ -179,12 +196,14 @@ projects a 2048x1024 angular canvas, crops 200 rows at the top and bottom, and
 publishes 2048x624 fixed-seam, four-level MultiBand output using the calibrated
 fisheye rotations and translations with a configurable 2.0 m finite stitching
 radius. The physical mapping is fixed as `front=3`, `right=2`,
-`rear=4`, `left=5`. The Host SDK RGB output uses a `[-pi, pi)` azimuth range,
-while the depth panorama uses `[0, 2*pi)`. The default
-`pano_align_to_depth: true` setting cyclically shifts RGB by half a frame
-without interpolation, so equal horizontal coordinates on `/orbvi/pano/image`
-and `/orbvi/depth/panorama` represent the same azimuth. Set it to `false` to
-restore the Host SDK's original RGB layout. Depth assistance is disabled by default because disparity
+`rear=4`, `left=5`. The Host SDK normalizes RGB and rig depth panoramas to the
+same `[0, 2*pi)` azimuth contract, so the Bridge copies both images without
+phase adjustment. The public `/orbvi/depth/panorama` image uses a cached
+output-pixel inverse lookup built from the rectified intrinsics and rotations.
+It intentionally does not apply stereo-pair translations, matching the original
+clean visualization path. The separate optional RGB depth-assistance path keeps
+using `RigDepthPanorama` with full rotation and translation. Neither path uses
+point-cloud generation. Depth assistance is disabled by default because disparity
 from the stereo network trails the raw fisheye capture; using stale geometry on
 moving objects would increase ghosting. A throttled log reports the effective
 camera mapping and whether the rotation extrinsics are applied.
@@ -289,6 +308,12 @@ Stream selection and reference settings are kept inside the launch file.
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
 | `publish_lidar_pcl` | `false` | Also convert Livox `CustomMsg` to `/orbvi/lidar/points` |
+| `publish_ipm` | `false` | Publish the four-fisheye `/orbvi/ipm/image` |
+| `ipm_camera_height_m` | `1.0` | Assumed height of the four horizontal cameras |
+| `ipm_extent_m` | `10.0` | Coverage from vehicle center in each cardinal direction |
+| `ipm_resolution_m_per_pixel` | `0.02` | BEV meters per pixel; side is `2*extent/resolution`, capped at 4096 |
+| `ipm_max_publish_rate_hz` | `5.0` | Maximum BEV rate; zero disables throttling |
+| `ipm_frame_id` | `base_link` | Frame id stored in the BEV image header |
 | `depth_viz_show_grid_values` | `false` | Draw a 5x5 grid and metric grid-point values on each directional depth visualization |
 | `publish_vio_path` | `true` | Accumulate optimized `/orbvi/vio/odometry` and publish `/orbvi/vio/path` |
 | `vio_path_max_poses` | `2000` | Maximum poses retained in the Path; values at or below zero are clamped to 1 |

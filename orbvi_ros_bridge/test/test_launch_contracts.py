@@ -27,6 +27,7 @@ ROS2_USER_LAUNCHES = {
 USER_ARGUMENT_DEFAULTS = {
     "host": "127.0.0.1",
     "publish_lidar_pcl": "false",
+    "publish_ipm": "false",
     "depth_viz_show_grid_values": "false",
     "publish_vio_path": "true",
     "vio_path_max_poses": "2000",
@@ -40,7 +41,6 @@ PANORAMA_ARGUMENT_DEFAULTS = {
     "pano_crop_top": "200",
     "pano_crop_bottom": "200",
     "pano_fov_half_deg": "95.0",
-    "pano_align_to_depth": "true",
     "pano_stitching_radius_m": "2.0",
     "pano_seam_blend_px": "16",
     "pano_seam_mode": "fixed",
@@ -147,6 +147,10 @@ class LaunchContractTest(unittest.TestCase):
                     "$(arg depth_viz_show_grid_values)",
                 )
                 self.assertEqual(
+                    ros1_param_value(path, "publish_ipm"),
+                    "$(arg publish_ipm)",
+                )
+                self.assertEqual(
                     ros1_param_value(path, "publish_vio_path"),
                     "$(arg publish_vio_path)",
                 )
@@ -173,6 +177,7 @@ class LaunchContractTest(unittest.TestCase):
                 self.assertEqual(parameters["streams"], expected_streams)
                 source = path.read_text(encoding="utf-8")
                 self.assertIn("LaunchConfiguration(\"host\")", source)
+                self.assertIn("LaunchConfiguration(\"publish_ipm\")", source)
                 self.assertIn(
                     "LaunchConfiguration(\n        \"depth_viz_show_grid_values\")",
                     source,
@@ -213,16 +218,6 @@ class LaunchContractTest(unittest.TestCase):
                 values = yaml_scalar_defaults(PACKAGE_ROOT / "config" / config_name)
                 for name, expected_value in PANORAMA_ARGUMENT_DEFAULTS.items():
                     self.assertEqual(values[name], expected_value)
-
-    def test_all_pano_configs_align_rgb_to_depth_azimuth(self):
-        for config_name in (
-            "pano_mode2.yaml",
-            "pano_mode2_ros2.yaml",
-            "pano_mode2_depth_assist.yaml",
-        ):
-            with self.subTest(config_name=config_name):
-                values = yaml_scalar_defaults(PACKAGE_ROOT / "config" / config_name)
-                self.assertEqual(values["pano_align_to_depth"], "true")
 
     def test_rviz_configs_include_vio_path_display(self):
         configs = {

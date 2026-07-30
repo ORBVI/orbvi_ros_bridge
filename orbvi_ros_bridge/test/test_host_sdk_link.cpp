@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -61,7 +63,7 @@ TEST(OrbviRosBridgePanoramaImages, HostSdkPanoramaRoutesToImageTopic) {
   EXPECT_EQ(message.data.size(), panorama.data.size());
 }
 
-TEST(OrbviRosBridgePanoramaImages, AlignsHostSdkAzimuthToDepthPanorama) {
+TEST(OrbviRosBridgePanoramaImages, CopiesSdkNormalizedAzimuthWithoutMutation) {
   orbvi_sdk::OwnedPanoramaImage panorama;
   panorama.width = 4;
   panorama.height = 1;
@@ -70,9 +72,9 @@ TEST(OrbviRosBridgePanoramaImages, AlignsHostSdkAzimuthToDepthPanorama) {
 
   sensor_msgs::Image message;
   ASSERT_TRUE(orbvi_ros_bridge::MakePanoramaImageMessage(
-      panorama.view(), &message, true));
+      panorama.view(), &message));
   const std::vector<std::uint8_t> expected = {
-      7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 90, 91};
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 90, 91};
   EXPECT_EQ(message.data, expected);
 }
 
@@ -135,6 +137,143 @@ TEST(OrbviRosBridgeHostSdkLink, RigDepthPanoramaSymbolMatchesBundledHeaders) {
   orbvi_sdk::DepthCalibration calibration;
   const auto result = orbvi_sdk::GenerateRigDepthPanorama(disparity, calibration);
   EXPECT_FALSE(result);
+}
+
+TEST(OrbviRosBridgeDepthPanorama, UsesStereoPairTranslation) {
+  orbvi_sdk::OwnedFrame disparity;
+  disparity.header.stream_id = orbvi_sdk::StreamId::Disparity;
+  disparity.header.format = orbvi_sdk::FrameFormat::Disparity32F;
+  disparity.header.compression = orbvi_sdk::Compression::None;
+  disparity.metadata["width"] = "2";
+  disparity.metadata["height"] = "2";
+  disparity.metadata["stride"] = "8";
+  disparity.metadata["disparity_tile_count"] = "1";
+  disparity.metadata["disparity_tile_width"] = "2";
+  disparity.metadata["disparity_tile_height"] = "2";
+  for (int i = 0; i < 4; ++i) {
+    AppendFloat32(&disparity.payload, 1.0f);
+  }
+  disparity.header.payload_size =
+      static_cast<std::uint32_t>(disparity.payload.size());
+
+  orbvi_sdk::DepthCalibration calibration;
+  calibration.width = 2;
+  calibration.height = 2;
+  calibration.tile_count = 1;
+  calibration.tile_width = 2;
+  calibration.tile_height = 2;
+  orbvi_sdk::DepthTileCalibration tile;
+  tile.tile_index = 0;
+  tile.width = 2;
+  tile.height = 2;
+  tile.fx_px = 1.0;
+  tile.fy_px = 1.0;
+  tile.baseline_m = 1.0;
+  tile.origin_translation_m = {1.0, 0.0, 0.0};
+  tile.has_world_transform = true;
+  calibration.tiles.push_back(tile);
+
+  orbvi_sdk::RigDepthPanoramaOptions options;
+  options.width = 64;
+  options.height = 32;
+  options.crop_top = 0;
+  options.crop_bottom = 0;
+  options.min_range_m = 0.1;
+  options.max_range_m = 10.0;
+  const auto generated =
+      orbvi_sdk::GenerateRigDepthPanorama(disparity, calibration, options);
+  ASSERT_TRUE(generated);
+  EXPECT_GT(std::count_if(
+                generated.value().confidence.begin(),
+                generated.value().confidence.end(),
+                [](std::uint8_t value) { return value != 0u; }),
+            0);
+
+  calibration.tiles[0].origin_translation_m = {0.0, 0.0, 0.0};
+  const auto untranslated =
+      orbvi_sdk::GenerateRigDepthPanorama(disparity, calibration, options);
+  ASSERT_TRUE(untranslated);
+  EXPECT_NE(generated.value().range_m, untranslated.value().range_m);
+}
+
+TEST(OrbviRosBridgeDepthPanorama, PublishedImageUsesCachedInverseLookup) {
+  orbvi_sdk::OwnedFrame disparity;
+  disparity.header.stream_id = orbvi_sdk::StreamId::Disparity;
+  disparity.header.format = orbvi_sdk::FrameFormat::Disparity32F;
+  disparity.header.compression = orbvi_sdk::Compression::None;
+  disparity.metadata["width"] = "2";
+  disparity.metadata["height"] = "2";
+  disparity.metadata["stride"] = "8";
+  disparity.metadata["disparity_tile_count"] = "1";
+  disparity.metadata["disparity_tile_width"] = "2";
+  disparity.metadata["disparity_tile_height"] = "2";
+  for (int i = 0; i < 4; ++i) {
+    AppendFloat32(&disparity.payload, 1.0f);
+  }
+  disparity.header.payload_size =
+      static_cast<std::uint32_t>(disparity.payload.size());
+
+  orbvi_sdk::DepthCalibration calibration;
+  calibration.width = 2;
+  calibration.height = 2;
+  calibration.tile_count = 1;
+  calibration.tile_width = 2;
+  calibration.tile_height = 2;
+  orbvi_sdk::DepthTileCalibration tile;
+  tile.tile_index = 0;
+  tile.width = 2;
+  tile.height = 2;
+  tile.fx_px = 1.0;
+  tile.fy_px = 1.0;
+  tile.cx_px = 0.5;
+  tile.cy_px = 0.5;
+  tile.baseline_m = 1.0;
+  tile.origin_translation_m = {1.0, 0.0, 0.0};
+  tile.has_world_transform = true;
+  calibration.tiles.push_back(tile);
+
+  orbvi_sdk::DepthPanoramaLookup lookup;
+  std::string error;
+  ASSERT_TRUE(
+      orbvi_ros_bridge::BuildDepthPanoramaLookup(
+          calibration, &lookup, &error))
+      << error;
+  sensor_msgs::Image translated;
+  ASSERT_TRUE(
+      orbvi_ros_bridge::MakeDepthPanoramaImage(
+          disparity.view(), calibration, lookup, &translated, &error))
+      << error;
+
+  calibration.tiles[0].origin_translation_m = {0.0, 0.0, 0.0};
+  sensor_msgs::Image untranslated;
+  ASSERT_TRUE(
+      orbvi_ros_bridge::MakeDepthPanoramaImage(
+          disparity.view(), calibration, lookup, &untranslated, &error))
+      << error;
+  EXPECT_EQ(translated.data, untranslated.data);
+  EXPECT_TRUE(std::any_of(
+      translated.data.begin(),
+      translated.data.end(),
+      [](std::uint8_t value) { return value != 0u; }));
+}
+
+TEST(OrbviRosBridgeDepthPanorama, CopiesSdkAzimuthContractWithoutMutation) {
+  orbvi_sdk::RigDepthPanorama panorama;
+  panorama.width = 4;
+  panorama.height = 1;
+  panorama.full_height = 1;
+  panorama.range_m = {1.0f, 2.0f, 3.0f, 4.0f};
+
+  sensor_msgs::Image image;
+  std::string error;
+  ASSERT_TRUE(
+      orbvi_ros_bridge::MakeDepthPanoramaImage(panorama, &image, &error))
+      << error;
+  ASSERT_EQ(image.data.size(), 4u * sizeof(float));
+  std::array<float, 4> output = {};
+  std::memcpy(output.data(), image.data.data(), image.data.size());
+  EXPECT_EQ(output, (std::array<float, 4>{1.0f, 2.0f, 3.0f, 4.0f}));
+  EXPECT_EQ(image.header.frame_id, "orbvi/depth/panorama");
 }
 
 TEST(OrbviRosBridgeDecodedImages, RectifiedCoreMetadataRoutesToPairDirectionTopic) {

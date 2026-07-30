@@ -37,6 +37,11 @@ struct SubscribeOptions {
 
 struct DeviceInfo {
   std::string device_name;
+  std::string release_profile;
+  std::string camera_profile;
+  std::string product;
+  std::string device_model;
+  std::string hardware_profile;
   std::string app_version;
   std::string protocol_version;
   std::vector<std::string> supported_streams;
@@ -279,11 +284,23 @@ class Client {
       DepthSubscribeOptions options,
       DepthFrameCallback callback);
   Result<OwnedPanoramaImage> getPanorama(const PanoramaStitchOptions& options = {});
+  Result<OwnedPanoramaImage> getPanorama(
+      PanoramaSourceMode source_mode,
+      const PanoramaStitchOptions& options = {});
   Result<PanoramaSubscriptionHandle> subscribePanorama(PanoramaFrameCallback callback);
   Result<PanoramaSubscriptionHandle> subscribePanorama(
       PanoramaSubscribeOptions options,
       PanoramaFrameCallback callback);
   Result<PanoramaSubscriptionHandle> subscribePanorama(
+      PanoramaSourceMode source_mode,
+      PanoramaSubscribeOptions options,
+      PanoramaFrameCallback callback);
+  Result<PanoramaSubscriptionHandle> subscribePanorama(
+      PanoramaSubscribeOptions options,
+      PanoramaDepthProvider depth_provider,
+      PanoramaFrameCallback callback);
+  Result<PanoramaSubscriptionHandle> subscribePanorama(
+      PanoramaSourceMode source_mode,
       PanoramaSubscribeOptions options,
       PanoramaDepthProvider depth_provider,
       PanoramaFrameCallback callback);

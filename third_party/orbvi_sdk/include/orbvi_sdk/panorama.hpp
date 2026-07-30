@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -12,6 +11,7 @@
 #include "orbvi_sdk/frame.hpp"
 #include "orbvi_sdk/image.hpp"
 #include "orbvi_sdk/depth.hpp"
+#include "orbvi_sdk/fisheye_rig.hpp"
 
 namespace orbvi_sdk {
 
@@ -26,39 +26,6 @@ enum class PanoramaBlendMode {
 enum class PanoramaSeamMode {
   Fixed,
   DynamicProgramming,
-};
-
-struct PanoramaCameraIntrinsics {
-  std::uint32_t camera_id = 0;
-  std::string role;
-  std::uint32_t width = 0;
-  std::uint32_t height = 0;
-  double fx = 0.0;
-  double fy = 0.0;
-  double cx = 0.0;
-  double cy = 0.0;
-  double xi = 0.0;
-  double lambda = 0.0;
-  double alpha = 0.0;
-  double b = 0.0;
-  double c = 0.0;
-};
-
-struct PanoramaCameraCalibration {
-  PanoramaCameraIntrinsics intrinsics;
-  std::array<double, 9> rotation_cam_to_reference = {
-      1.0, 0.0, 0.0,
-      0.0, 1.0, 0.0,
-      0.0, 0.0, 1.0};
-  std::array<double, 3> translation_cam_in_reference_m = {0.0, 0.0, 0.0};
-  bool has_full_extrinsics = false;
-};
-
-struct PanoramaCalibration {
-  std::string calibration_version;
-  std::string calibration_hash;
-  std::array<double, 3> panorama_origin_reference_m = {0.0, 0.0, 0.0};
-  std::vector<PanoramaCameraCalibration> cameras;
 };
 
 struct PanoramaSeamAvoidanceMaskView {
@@ -172,11 +139,19 @@ using PanoramaFrameCallback = std::function<void(const PanoramaFrameDelivery&)>;
 using PanoramaDepthProvider =
     std::function<std::shared_ptr<const RigDepthPanorama>(std::uint64_t)>;
 
+enum class PanoramaSourceMode {
+  // Prefer the board GPU stream. Fall back to Host derivation only when the
+  // device explicitly advertises pano_display_stream as unsupported.
+  BoardPreferredWithHostFallback,
+  // Require pano_display_stream. Runtime failures never switch to Host work.
+  BoardOnly,
+  // Always derive from raw_fisheye_stream on the Host.
+  HostOnly,
+};
+
 struct PanoramaSubscribeOptions {
-  // Production subscriptions consume the already-stitched board
-  // pano_display_stream. `stitch.width/height` are the expected wire geometry;
-  // the remaining stitch fields are retained for source compatibility and are
-  // used only by the offline GeneratePanorama helpers.
+  // Board subscriptions use stitch.width/height as expected wire geometry.
+  // Host-derived compatibility subscriptions use the full stitch policy.
   PanoramaStitchOptions stitch;
   double target_output_rate_hz = 10.0;
   std::uint32_t source_frame_stride = 2;

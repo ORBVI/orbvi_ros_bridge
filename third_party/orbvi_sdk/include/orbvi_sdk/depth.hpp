@@ -137,10 +137,10 @@ struct DepthPanorama {
   DepthMapView view() const;
 };
 
-// Dense spherical range geometry expressed in the calibration reference frame.
-// Unlike DepthPanorama, this product is built by reconstructing rectified 3-D
-// points with each stereo pair's full pose and z-buffering them around a common
-// rig origin. It is intended for parallax-aware RGB seam reprojection.
+// Dense spherical range image expressed in the calibration reference frame.
+// Unlike DepthPanorama, this product applies each stereo pair's full pose and
+// rasterizes the source depth-image grid around a common rig origin. It is a
+// depth-image product and does not depend on point-cloud generation.
 struct RigDepthPanoramaOptions {
   std::uint32_t width = 2048;
   std::uint32_t height = 1024;

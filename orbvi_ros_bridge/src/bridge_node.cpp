@@ -19,11 +19,20 @@
 #include <utility>
 #include <vector>
 
+#if __has_include("orbvi_sdk/birds_eye_view.hpp")
+#include "orbvi_sdk/birds_eye_view.hpp"
+#endif
+
 #include "frame_conversions.hpp"
 #include "panorama_options.hpp"
 
 namespace orbvi_ros_bridge {
 namespace {
+
+struct IpmOptions : orbvi_sdk::BirdsEyeViewOptions {
+  bool enabled = false;
+  double max_publish_rate_hz = 5.0;
+};
 
 struct BridgeConfig {
   std::string host = "127.0.0.1";
@@ -49,7 +58,7 @@ struct BridgeConfig {
   bool publish_depth_panorama = true;
   bool colorize_depth_pointcloud = true;
   bool publish_panorama = false;
-  bool panorama_align_to_depth = true;
+  IpmOptions ipm;
   bool publish_lidar_pcl = false;
   bool publish_vio_path = true;
   std::size_t vio_path_max_poses = 2000;
@@ -285,6 +294,7 @@ class BridgeNode::Impl {
     }
 
     PrepareDepthPublisher();
+    PrepareIpmPublisher();
     StartDepthDerivedWorker();
 
     for (const auto stream : config_.streams) {
@@ -396,6 +406,22 @@ class BridgeNode::Impl {
         "publish_compressed_images",
         config.publish_compressed_images,
         config.publish_compressed_images);
+    private_node_.param<bool>("publish_ipm", config.ipm.enabled, config.ipm.enabled);
+    private_node_.param<double>(
+        "ipm_camera_height_m",
+        config.ipm.camera_height_m,
+        config.ipm.camera_height_m);
+    private_node_.param<double>("ipm_extent_m", config.ipm.extent_m, config.ipm.extent_m);
+    private_node_.param<double>(
+        "ipm_resolution_m_per_pixel",
+        config.ipm.resolution_m_per_pixel,
+        config.ipm.resolution_m_per_pixel);
+    private_node_.param<double>(
+        "ipm_max_publish_rate_hz",
+        config.ipm.max_publish_rate_hz,
+        config.ipm.max_publish_rate_hz);
+    private_node_.param<std::string>(
+        "ipm_frame_id", config.ipm.frame_id, config.ipm.frame_id);
 
     int queue_size = static_cast<int>(config.queue_size);
     private_node_.param<int>("queue_size", queue_size, queue_size);
@@ -441,6 +467,16 @@ class BridgeNode::Impl {
 
     LoadImageMode(&config);
     LoadStreams(&config);
+    if (config.ipm.enabled) {
+      if (config.decode_mode == orbvi_sdk::DecodeMode::RawOnly) {
+        config.decode_mode = orbvi_sdk::DecodeMode::RawAndDecoded;
+        ROS_INFO("IPM output requires decoded fisheye frames; enabling SDK decode");
+      }
+      if (!HasStream(config.streams, orbvi_sdk::StreamId::RawFisheye)) {
+        config.streams.push_back(orbvi_sdk::StreamId::RawFisheye);
+        ROS_INFO("IPM output requires raw_fisheye_stream; subscribing it");
+      }
+    }
     LoadDepthOptions(&config);
     LoadPanoramaOptions(&config);
     bool publish_depth_bool = false;
@@ -606,15 +642,6 @@ class BridgeNode::Impl {
         "panorama_fov_half_deg",
         config->panorama_options.stitch.fov_half_deg,
         config->panorama_options.stitch.fov_half_deg);
-
-    private_node_.param<bool>(
-        "pano_align_to_depth",
-        config->panorama_align_to_depth,
-        config->panorama_align_to_depth);
-    private_node_.param<bool>(
-        "panorama_align_to_depth",
-        config->panorama_align_to_depth,
-        config->panorama_align_to_depth);
 
     private_node_.param<double>(
         "pano_stitching_radius_m",
@@ -896,7 +923,8 @@ class BridgeNode::Impl {
   void PrepareDepthPublisher() {
     depth_calibration_.reset();
     depth_panorama_lookup_.reset();
-    if (!config_.publish_depth && !NeedsPanoramaDepth()) {
+    if (!config_.publish_depth && !config_.publish_depth_panorama &&
+        !config_.publish_depth_pointcloud && !NeedsPanoramaDepth()) {
       return;
     }
     auto calibration_status = client_->getCalibration("");
@@ -918,6 +946,22 @@ class BridgeNode::Impl {
       return;
     }
     depth_calibration_ = calibration.value();
+    panorama_depth_origin_reference_m_ = {0.0, 0.0, 0.0};
+    std::size_t transformed_tile_count = 0;
+    for (const auto& tile : depth_calibration_->tiles) {
+      if (!tile.has_world_transform) {
+        continue;
+      }
+      for (std::size_t axis = 0; axis < panorama_depth_origin_reference_m_.size(); ++axis) {
+        panorama_depth_origin_reference_m_[axis] += tile.origin_translation_m[axis];
+      }
+      ++transformed_tile_count;
+    }
+    if (transformed_tile_count > 0u) {
+      for (double& value : panorama_depth_origin_reference_m_) {
+        value /= static_cast<double>(transformed_tile_count);
+      }
+    }
     if (NeedsPanoramaDepth()) {
       auto panorama_calibration =
           orbvi_sdk::MakePanoramaCalibration(calibration_status.value());
@@ -951,13 +995,15 @@ class BridgeNode::Impl {
       }
     }
     if (config_.publish_depth_panorama) {
-      DepthPanoramaLookup lookup;
+      orbvi_sdk::DepthPanoramaLookup lookup;
       std::string error;
       if (BuildDepthPanoramaLookup(*depth_calibration_, &lookup, &error)) {
         depth_panorama_lookup_ = std::move(lookup);
       } else {
         config_.publish_depth_panorama = false;
-        ROS_WARN_STREAM("Depth panorama output disabled: " << error);
+        ROS_WARN_STREAM(
+            "Depth panorama output disabled: failed to build inverse lookup: "
+            << error);
       }
     }
     ROS_INFO_STREAM(
@@ -980,6 +1026,46 @@ class BridgeNode::Impl {
         << (static_cast<double>(config_.pointcloud_color_options.max_timestamp_delta_ns) / 1.0e6)
         << ", pointcloud_max_disp_jump_px="
         << config_.pointcloud_options.max_disparity_jump_px);
+  }
+
+  void PrepareIpmPublisher() {
+    ipm_generator_ = orbvi_sdk::BirdsEyeViewGenerator();
+    last_ipm_publish_time_ = std::chrono::steady_clock::time_point();
+    if (!config_.ipm.enabled) {
+      return;
+    }
+    auto calibration_status = client_->getCalibration("");
+    if (!calibration_status) {
+      ROS_ERROR_STREAM(
+          "IPM output disabled: failed to fetch ORBVI calibration: "
+          << calibration_status.error().message);
+      config_.ipm.enabled = false;
+      return;
+    }
+    auto calibration =
+        orbvi_sdk::MakePanoramaCalibration(calibration_status.value());
+    if (!calibration) {
+      ROS_ERROR_STREAM(
+          "IPM output disabled: invalid fisheye calibration: "
+          << calibration.error().message);
+      config_.ipm.enabled = false;
+      return;
+    }
+    const auto initialized =
+        ipm_generator_.Initialize(calibration.value(), config_.ipm);
+    if (!initialized) {
+      ROS_ERROR_STREAM(
+          "IPM output disabled: " << initialized.error().message);
+      config_.ipm.enabled = false;
+      return;
+    }
+    ROS_INFO_STREAM(
+        "IPM output enabled on " << JoinTopic(config_.topic_prefix, "ipm/image")
+        << ", size=" << ipm_generator_.width() << "x" << ipm_generator_.height()
+        << ", extent_m=" << config_.ipm.extent_m
+        << ", resolution_m_per_pixel=" << config_.ipm.resolution_m_per_pixel
+        << ", camera_height_m=" << config_.ipm.camera_height_m
+        << ", max_publish_rate_hz=" << config_.ipm.max_publish_rate_hz);
   }
 
   void StartDepthDerivedWorker() {
@@ -1238,6 +1324,7 @@ class BridgeNode::Impl {
   void PublishImages(
       const orbvi_sdk::FrameView& frame,
       const orbvi_sdk::FrameDelivery& delivery) {
+    PublishIpm(frame, delivery);
     CacheRectifiedLeftImages(frame, delivery);
     if (config_.publish_compressed_images) {
       std::string skipped_reason;
@@ -1263,6 +1350,41 @@ class BridgeNode::Impl {
             .publish(output.message);
       }
     }
+  }
+
+  void PublishIpm(
+      const orbvi_sdk::FrameView& frame,
+      const orbvi_sdk::FrameDelivery& delivery) {
+    if (!config_.ipm.enabled ||
+        frame.stream_id != orbvi_sdk::StreamId::RawFisheye) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (config_.ipm.max_publish_rate_hz > 0.0 &&
+        last_ipm_publish_time_ != std::chrono::steady_clock::time_point() &&
+        now - last_ipm_publish_time_ <
+            std::chrono::duration<double>(1.0 / config_.ipm.max_publish_rate_hz)) {
+      return;
+    }
+    auto generated = ipm_generator_.Generate(delivery.decoded_images);
+    if (!generated) {
+      ROS_WARN_THROTTLE(
+          5.0, "IPM frame skipped: %s", generated.error().message.c_str());
+      return;
+    }
+    last_ipm_publish_time_ = now;
+    const auto& ipm = generated.value();
+    sensor_msgs::Image message;
+    message.header.stamp.fromNSec(ipm.timestamp_ns);
+    message.header.frame_id = ipm.frame_id;
+    message.height = ipm.height;
+    message.width = ipm.width;
+    message.encoding = "bgr8";
+    message.is_bigendian = 0;
+    message.step = ipm.stride;
+    message.data = ipm.data;
+    Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "ipm/image"))
+        .publish(message);
   }
 
   void CacheRectifiedLeftImages(
@@ -1361,8 +1483,7 @@ class BridgeNode::Impl {
 
   void PublishPanorama(const orbvi_sdk::PanoramaFrameDelivery& delivery) {
     sensor_msgs::Image message;
-    if (!MakePanoramaImageMessage(
-            delivery.panorama.view(), &message, config_.panorama_align_to_depth)) {
+    if (!MakePanoramaImageMessage(delivery.panorama.view(), &message)) {
       ROS_WARN_THROTTLE(5.0, "Failed to convert Host SDK panorama to ROS Image");
       return;
     }
@@ -1379,14 +1500,12 @@ class BridgeNode::Impl {
       ROS_INFO_THROTTLE(
           2.0,
           "Panorama depth assist applied=%s backend=%s cameras=%s "
-          "align_to_depth=%s "
           "rotation_extrinsics=%s translation_extrinsics=%s valid_ratio=%.3f "
           "rgb_depth_delta=%.2fms depth_geometry=%.2fms stitch=%.2fms "
           "assisted=%llu fallback=%llu sync_drops=%llu depth_failures=%llu",
           applied == delivery.panorama.metadata.end() ? "unknown" : applied->second.c_str(),
           backend == delivery.panorama.metadata.end() ? "unknown" : backend->second.c_str(),
           camera_map == delivery.panorama.metadata.end() ? "unknown" : camera_map->second.c_str(),
-          config_.panorama_align_to_depth ? "true" : "false",
           rotation == delivery.panorama.metadata.end() ? "unknown" : rotation->second.c_str(),
           translation == delivery.panorama.metadata.end() ? "unknown" : translation->second.c_str(),
           delivery.stats.depth_valid_ratio,
@@ -1400,10 +1519,9 @@ class BridgeNode::Impl {
     } else {
       ROS_INFO_THROTTLE(
           2.0,
-          "Panorama geometry cameras=%s align_to_depth=%s rotation_extrinsics=%s "
+          "Panorama geometry cameras=%s rotation_extrinsics=%s "
           "translation_extrinsics=false depth_assist=false stitch=%.2fms",
           camera_map == delivery.panorama.metadata.end() ? "unknown" : camera_map->second.c_str(),
-          config_.panorama_align_to_depth ? "true" : "false",
           rotation == delivery.panorama.metadata.end() ? "unknown" : rotation->second.c_str(),
           delivery.stats.stitch_latency_ms);
     }
@@ -1494,7 +1612,8 @@ class BridgeNode::Impl {
   }
 
   void PublishDepthPanorama(const orbvi_sdk::FrameView& frame) {
-    if (!config_.publish_depth_panorama || !depth_calibration_ || !depth_panorama_lookup_) {
+    if (!config_.publish_depth_panorama || !depth_calibration_ ||
+        !depth_panorama_lookup_) {
       return;
     }
     sensor_msgs::Image message;
@@ -1615,7 +1734,9 @@ class BridgeNode::Impl {
   BridgeConfig config_;
   std::unique_ptr<orbvi_sdk::Client> client_;
   std::optional<orbvi_sdk::DepthCalibration> depth_calibration_;
-  std::optional<DepthPanoramaLookup> depth_panorama_lookup_;
+  std::optional<orbvi_sdk::DepthPanoramaLookup> depth_panorama_lookup_;
+  orbvi_sdk::BirdsEyeViewGenerator ipm_generator_;
+  std::chrono::steady_clock::time_point last_ipm_publish_time_;
   std::optional<orbvi_sdk::PanoramaSubscriptionHandle> panorama_subscription_;
   std::vector<orbvi_sdk::SubscriptionHandle> subscriptions_;
   std::mutex panorama_depth_mutex_;

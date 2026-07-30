@@ -9,7 +9,6 @@
     pano_crop_bottom: 200
     pano_fov_half_deg: 95.0
     # Publish RGB with the depth panorama's [0, 2*pi) azimuth convention.
-    pano_align_to_depth: true
     # Finite-radius projection uses calibrated camera translations to reduce
     # parallax near the selected indoor working distance. Set 0 for infinity.
     pano_stitching_radius_m: 2.0

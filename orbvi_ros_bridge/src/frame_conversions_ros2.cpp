@@ -585,21 +585,6 @@ bool ReadDisparityPx(
   return true;
 }
 
-double Dot3(const std::array<double, 3>& lhs, const std::array<double, 3>& rhs) {
-  return lhs[0] * rhs[0] + lhs[1] * rhs[1] + lhs[2] * rhs[2];
-}
-
-std::array<double, 3> RectDirectionFromWorld(
-    const orbvi_sdk::DepthTileCalibration& tile,
-    const std::array<double, 3>& world_direction) {
-  const auto& r = tile.rotation_world;
-  return {
-      r[0] * world_direction[0] + r[3] * world_direction[1] + r[6] * world_direction[2],
-      r[1] * world_direction[0] + r[4] * world_direction[1] + r[7] * world_direction[2],
-      r[2] * world_direction[0] + r[5] * world_direction[1] + r[8] * world_direction[2],
-  };
-}
-
 const orbvi_sdk::DepthTileCalibration* FindTileByIndex(
     const orbvi_sdk::DepthCalibration& calibration,
     std::uint32_t tile_index) {
@@ -1192,8 +1177,7 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
 
 bool MakePanoramaImageMessage(
     const orbvi_sdk::PanoramaImageView& panorama,
-    sensor_msgs::msg::Image* out,
-    bool align_to_depth_azimuth) {
+    sensor_msgs::msg::Image* out) {
   if (out == nullptr || panorama.data == nullptr ||
       panorama.data_size == 0 || panorama.width == 0 ||
       panorama.height == 0 || panorama.stride == 0 ||
@@ -1213,30 +1197,7 @@ bool MakePanoramaImageMessage(
   out->encoding = "bgr8";
   out->is_bigendian = 0;
   out->step = panorama.stride;
-  if (!align_to_depth_azimuth) {
-    out->data.assign(panorama.data, panorama.data + expected_size);
-  } else {
-    // Host SDK RGB uses [-pi, pi), while the Bridge depth panorama uses
-    // [0, 2*pi). A half-width cyclic shift gives both topics the depth
-    // panorama's pixel-to-azimuth convention without resampling the image.
-    const std::size_t row_pixels_size = static_cast<std::size_t>(panorama.width) * 3u;
-    const std::size_t shift_size = static_cast<std::size_t>(panorama.width / 2u) * 3u;
-    const std::size_t first_size = row_pixels_size - shift_size;
-    out->data.resize(expected_size);
-    for (std::uint32_t row = 0; row < panorama.height; ++row) {
-      const auto row_offset = static_cast<std::size_t>(row) * panorama.stride;
-      const auto* source = panorama.data + row_offset;
-      auto* target = out->data.data() + row_offset;
-      std::memcpy(target, source + shift_size, first_size);
-      std::memcpy(target + first_size, source, shift_size);
-      if (panorama.stride > row_pixels_size) {
-        std::memcpy(
-            target + row_pixels_size,
-            source + row_pixels_size,
-            panorama.stride - row_pixels_size);
-      }
-    }
-  }
+  out->data.assign(panorama.data, panorama.data + expected_size);
   return true;
 }
 
@@ -1305,194 +1266,81 @@ std::vector<ImageOutput> MakeSplitDepthImages(
   return SplitVerticalTileImage(image, calibration, "depth");
 }
 
+static orbvi_sdk::DepthPanoramaOptions MakePublishedDepthPanoramaOptions() {
+  orbvi_sdk::DepthPanoramaOptions options;
+  options.width = kDepthPanoramaWidth;
+  options.height = kDepthPanoramaFullHeight;
+  options.crop_top = kDepthPanoramaCropTop;
+  options.crop_bottom = kDepthPanoramaCropBottom;
+  options.min_disparity_px = kDepthPanoramaMinDisparityPx;
+  options.min_range_m = kDepthPanoramaMinRangeM;
+  options.max_range_m = kDepthPanoramaMaxRangeM;
+  options.frame_id = kDepthPanoramaFrameId;
+  return options;
+}
+
 bool BuildDepthPanoramaLookup(
     const orbvi_sdk::DepthCalibration& calibration,
-    DepthPanoramaLookup* out,
+    orbvi_sdk::DepthPanoramaLookup* out,
     std::string* error) {
   if (out == nullptr) {
     return SetError(error, "depth panorama lookup output is null");
   }
-  if (calibration.tiles.empty() || calibration.tile_count == 0) {
-    return SetError(error, "depth calibration is empty");
+  auto lookup = orbvi_sdk::BuildDepthPanoramaLookup(
+      calibration, MakePublishedDepthPanoramaOptions());
+  if (!lookup) {
+    return SetError(error, lookup.error().message);
   }
-  if (kDepthPanoramaCropTop + kDepthPanoramaCropBottom >= kDepthPanoramaFullHeight) {
-    return SetError(error, "depth panorama crop removes all rows");
-  }
-  const std::uint32_t output_height =
-      kDepthPanoramaFullHeight - kDepthPanoramaCropTop - kDepthPanoramaCropBottom;
-  const std::size_t sample_count =
-      static_cast<std::size_t>(kDepthPanoramaWidth) * output_height;
-  for (const auto& tile : calibration.tiles) {
-    if (!tile.has_world_transform) {
-      return SetError(error, "depth panorama requires rectified tile world transforms");
-    }
-    if (tile.tile_index >= calibration.tile_count || tile.width == 0 ||
-        tile.height == 0 || tile.fx_px <= 0.0 || tile.fy_px <= 0.0) {
-      return SetError(error, "depth panorama tile calibration is incomplete");
-    }
-  }
-
-  DepthPanoramaLookup lookup;
-  lookup.width = kDepthPanoramaWidth;
-  lookup.height = output_height;
-  lookup.full_height = kDepthPanoramaFullHeight;
-  lookup.crop_top = kDepthPanoramaCropTop;
-  lookup.crop_bottom = kDepthPanoramaCropBottom;
-  lookup.calibration_version = calibration.calibration_version;
-  lookup.calibration_hash = calibration.calibration_hash;
-  lookup.samples.assign(sample_count, DepthPanoramaSample{});
-
-  std::size_t valid_count = 0;
-  for (std::uint32_t v = 0; v < output_height; ++v) {
-    const std::uint32_t src_v = v + kDepthPanoramaCropTop;
-    const double elevation =
-        (kPi / 2.0) -
-        (static_cast<double>(src_v) + 0.5) /
-            static_cast<double>(kDepthPanoramaFullHeight) * kPi;
-    const double cos_el = std::cos(elevation);
-    const double sin_el = std::sin(elevation);
-
-    for (std::uint32_t u = 0; u < kDepthPanoramaWidth; ++u) {
-      const double azimuth =
-          (static_cast<double>(u) + 0.5) /
-          static_cast<double>(kDepthPanoramaWidth) * 2.0 * kPi;
-      const std::array<double, 3> dir_world = {
-          cos_el * std::sin(azimuth),
-          -sin_el,
-          cos_el * std::cos(azimuth),
-      };
-
-      const orbvi_sdk::DepthTileCalibration* best_tile = nullptr;
-      std::array<double, 3> best_rect = {0.0, 0.0, 0.0};
-      double best_z = -1.0;
-      for (const auto& tile : calibration.tiles) {
-        const auto dir_rect = RectDirectionFromWorld(tile, dir_world);
-        if (dir_rect[2] > best_z) {
-          best_z = dir_rect[2];
-          best_tile = &tile;
-          best_rect = dir_rect;
-        }
-      }
-      if (best_tile == nullptr || best_z <= 1e-6) {
-        continue;
-      }
-
-      const double px =
-          best_tile->fx_px * best_rect[0] / best_rect[2] + best_tile->cx_px;
-      const double py =
-          best_tile->fy_px * best_rect[1] / best_rect[2] + best_tile->cy_px;
-      const int rect_x = static_cast<int>(std::round(px));
-      const int rect_y = static_cast<int>(std::round(py));
-      if (rect_x < 0 || rect_y < 0 ||
-          rect_x >= static_cast<int>(best_tile->width) ||
-          rect_y >= static_cast<int>(best_tile->height)) {
-        continue;
-      }
-
-      DepthPanoramaSample& sample =
-          lookup.samples[static_cast<std::size_t>(v) * kDepthPanoramaWidth + u];
-      sample.tile_index = static_cast<std::int32_t>(best_tile->tile_index);
-      sample.x = static_cast<std::uint32_t>(rect_x);
-      sample.y = static_cast<std::uint32_t>(rect_y);
-      sample.range_scale =
-          static_cast<float>(std::sqrt(Dot3(best_rect, best_rect)) / best_rect[2]);
-      ++valid_count;
-    }
-  }
-  if (valid_count == 0) {
-    return SetError(error, "depth panorama lookup has no valid pixels");
-  }
-  *out = std::move(lookup);
+  *out = std::move(lookup.value());
   return true;
 }
 
 bool MakeDepthPanoramaImage(
     const orbvi_sdk::FrameView& disparity_frame,
     const orbvi_sdk::DepthCalibration& calibration,
-    const DepthPanoramaLookup& lookup,
+    const orbvi_sdk::DepthPanoramaLookup& lookup,
+    sensor_msgs::msg::Image* out,
+    std::string* error) {
+  auto generated =
+      orbvi_sdk::GenerateDepthPanorama(
+          disparity_frame,
+          calibration,
+          lookup,
+          MakePublishedDepthPanoramaOptions());
+  if (!generated) {
+    return SetError(error, generated.error().message);
+  }
+  if (!MakeDepthImage(generated.value().view(), out)) {
+    return SetError(error, "failed to convert inverse-lookup depth panorama");
+  }
+  return true;
+}
+
+bool MakeDepthPanoramaImage(
+    const orbvi_sdk::RigDepthPanorama& depth,
     sensor_msgs::msg::Image* out,
     std::string* error) {
   if (out == nullptr) {
     return SetError(error, "depth panorama image output is null");
   }
-  DecodedDisparityLayout layout;
-  if (!MakeDisparityLayout(disparity_frame, calibration, &layout, error)) {
-    return false;
-  }
-  const std::size_t sample_count =
-      static_cast<std::size_t>(lookup.width) * lookup.height;
-  if (lookup.width == 0 || lookup.height == 0 || lookup.samples.size() != sample_count) {
-    return SetError(error, "depth panorama lookup layout is invalid");
-  }
-  if ((!lookup.calibration_version.empty() &&
-       !calibration.calibration_version.empty() &&
-       lookup.calibration_version != calibration.calibration_version) ||
-      (!lookup.calibration_hash.empty() &&
-       !calibration.calibration_hash.empty() &&
-       lookup.calibration_hash != calibration.calibration_hash)) {
-    return SetError(
-        error,
-        "depth panorama lookup calibration does not match current calibration");
-  }
-  if ((!disparity_frame.calibration_version.empty() &&
-       !calibration.calibration_version.empty() &&
-       disparity_frame.calibration_version != calibration.calibration_version) ||
-      (!disparity_frame.calibration_hash.empty() &&
-       !calibration.calibration_hash.empty() &&
-       disparity_frame.calibration_hash != calibration.calibration_hash)) {
-    return SetError(
-        error,
-        "disparity frame calibration does not match depth panorama calibration");
+  const std::size_t pixel_count =
+      static_cast<std::size_t>(depth.width) * depth.height;
+  if (depth.width == 0 || depth.height == 0 ||
+      depth.range_m.size() != pixel_count ||
+      depth.crop_top + depth.crop_bottom >= depth.full_height ||
+      depth.height != depth.full_height - depth.crop_top - depth.crop_bottom) {
+    return SetError(error, "rig depth panorama layout is invalid");
   }
 
-  out->header = MakeHeader(disparity_frame.timestamp_ns, kDepthPanoramaFrameId);
-  out->height = lookup.height;
-  out->width = lookup.width;
+  out->header = MakeHeader(depth.timestamp_ns, kDepthPanoramaFrameId);
+  out->height = depth.height;
+  out->width = depth.width;
   out->encoding = "32FC1";
   out->is_bigendian = 0;
-  out->step = lookup.width * sizeof(float);
-  out->data.assign(sample_count * sizeof(float), 0);
+  out->step = depth.width * sizeof(float);
+  out->data.resize(pixel_count * sizeof(float));
 
-  for (std::uint32_t v = 0; v < lookup.height; ++v) {
-    for (std::uint32_t u = 0; u < lookup.width; ++u) {
-      const std::size_t index = static_cast<std::size_t>(v) * lookup.width + u;
-      const auto& sample = lookup.samples[index];
-      if (sample.tile_index < 0 ||
-          static_cast<std::uint32_t>(sample.tile_index) >= layout.tile_count) {
-        continue;
-      }
-      const auto* tile =
-          FindTileByIndex(calibration, static_cast<std::uint32_t>(sample.tile_index));
-      if (tile == nullptr || sample.x >= tile->width || sample.y >= tile->height) {
-        continue;
-      }
-      const std::uint32_t disparity_y =
-          tile->tile_index * layout.tile_height + sample.y;
-      if (disparity_y >= layout.height) {
-        continue;
-      }
-
-      double disparity_px = 0.0;
-      if (!ReadDisparityPx(
-              disparity_frame,
-              layout,
-              sample.x,
-              disparity_y,
-              &disparity_px) ||
-          disparity_px < kDepthPanoramaMinDisparityPx) {
-        continue;
-      }
-      const double depth_z_m = tile->fx_px * tile->baseline_m / disparity_px;
-      const double range_m = depth_z_m * sample.range_scale;
-      if (!std::isfinite(range_m) ||
-          range_m < kDepthPanoramaMinRangeM ||
-          range_m > kDepthPanoramaMaxRangeM) {
-        continue;
-      }
-      const float range_f = static_cast<float>(range_m);
-      std::memcpy(out->data.data() + index * sizeof(float), &range_f, sizeof(range_f));
-    }
-  }
+  std::memcpy(out->data.data(), depth.range_m.data(), out->data.size());
   return true;
 }
 

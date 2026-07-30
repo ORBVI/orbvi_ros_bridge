@@ -38,6 +38,7 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | 开启 decoded 时发布的校正图像 |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | 校正后的 stereo pair 压缩图像 transport |
 | `/orbvi/pano/image` | `sensor_msgs/Image` | `streams` 包含 `pano` 时，由 Host SDK 从 `raw_fisheye_stream` 拼接出的全景图 |
+| `/orbvi/ipm/image` | `sensor_msgs/Image` | 四路鱼眼投影到地平面并融合的 360° BEV，`bgr8` |
 | `/orbvi/imu` | `sensor_msgs/Imu` | 设备 IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 点云流 |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU 流 |
@@ -136,6 +137,21 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
 
+启用四路鱼眼 360° IPM：
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
+  host:=<device-ip> publish_ipm:=true
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
+  host:=<device-ip> publish_ipm:=true
+```
+
+IPM 默认假设四个相机离地 1.0 m，并分别水平朝向前、右、后、左。输出以
+`base_link` 为坐标系，图像上方为车体前方、左侧为车体左方；默认覆盖车体周围
+20 m × 20 m，分辨率 0.02 m/px，输出 1000×1000，最大发布频率 5 Hz。启动时依据
+设备标定预计算映射、接缝权重及逐帧融合均在 `liborbvi_sdk` 内完成；Bridge 只负责
+ROS 参数、发布节流和图像发布。
+
 如需在四方向深度可视化图中绘制 5×5 网格，并显示每个网格交点的深度值，启用
 `depth_viz_show_grid_values`：
 
@@ -169,11 +185,12 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 `config/pano_mode2_ros2.yaml` 默认配置。默认以 2048x1024 完整角度画布投影，
 上下各裁 200 行后发布 2048x624 图像；默认使用固定接缝、4 层 MultiBand，以及
 鱼眼旋转/平移外参和可调的 2.0 m 有限拼接半径。物理相机映射固定为
-`front=3、right=2、rear=4、left=5`。
-RGB SDK 输出原本采用 `[-pi, pi)` 方位范围，而深度全景采用 `[0, 2*pi)`；默认配置
-`pano_align_to_depth: true` 会在发布时将 RGB 无插值循环平移半幅，使
-`/orbvi/pano/image` 与 `/orbvi/depth/panorama` 的同一横坐标表示同一方位。设为
-`false` 可恢复 Host SDK 的原始 RGB 布局。
+`front=3、right=2、rear=4、left=5`。Host SDK 已将 RGB 与 rig 深度全景统一为
+`[0, 2*pi)` 方位契约，Bridge 仅复制图像，不再执行相位调整。
+公开 `/orbvi/depth/panorama` 恢复为按输出像素反向查表：查表仅在标定加载时构建一次，
+使用 rectified 内参与旋转外参，刻意不应用各双目光心平移，以保持最早版本的连续显示
+风格。独立的 RGB 深度辅助仍使用带完整旋转和平移的 `RigDepthPanorama`。两条链路均不
+经过点云生成接口。
 双目网络输出的 disparity 天然晚于原始鱼眼帧，默认配置暂时关闭深度辅助，避免把
 旧深度用于运动目标；运行日志会打印实际相机映射及旋转外参是否生效。
 可选深度路径会缓存最近 4 个 `RigDepthPanorama`，RGB 回调只无阻塞读取时间最接近
@@ -271,6 +288,12 @@ scripts/orbvi_ros_bridge_rate_check.sh \
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI 设备 IP 或 hostname |
 | `publish_lidar_pcl` | `false` | 额外将 Livox `CustomMsg` 转换并发布到 `/orbvi/lidar/points` |
+| `publish_ipm` | `false` | 发布四路鱼眼融合的 `/orbvi/ipm/image` |
+| `ipm_camera_height_m` | `1.0` | 四个水平相机相对地面的假定高度 |
+| `ipm_extent_m` | `10.0` | BEV 从车体中心向前、后、左、右各覆盖的距离 |
+| `ipm_resolution_m_per_pixel` | `0.02` | BEV 米/像素；输出边长为 `2*extent/resolution`，最大 4096 |
+| `ipm_max_publish_rate_hz` | `5.0` | BEV 最大发布频率；0 表示不节流 |
+| `ipm_frame_id` | `base_link` | BEV 图像 header 的坐标系 |
 | `depth_viz_show_grid_values` | `false` | 在每路方向深度可视化图上绘制 5×5 网格及网格交点米制深度值 |
 | `publish_vio_path` | `true` | 将优化后的 `/orbvi/vio/odometry` 累计并发布到 `/orbvi/vio/path` |
 | `vio_path_max_poses` | `2000` | Path 中保留的最大 Pose 数；小于等于 0 时按 1 处理 |

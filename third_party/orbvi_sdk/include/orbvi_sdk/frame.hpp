@@ -62,6 +62,7 @@ struct FrameView {
   FrameFormat format = FrameFormat::Unknown;
   Compression compression = Compression::None;
   std::uint64_t timestamp_ns = 0;
+  TimestampDomain timestamp_domain = TimestampDomain::Unknown;
   std::string frame_id;
   const MetadataMap* metadata = nullptr;
   const std::uint8_t* payload_data = nullptr;

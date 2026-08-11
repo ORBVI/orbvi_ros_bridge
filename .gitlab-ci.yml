@@ -1,6 +1,7 @@
 stages:
   - docker
   - test
+  - publish
 
 variables:
   GIT_SUBMODULE_STRATEGY: none
@@ -179,3 +180,43 @@ ros2:orbvi:arm64:
   tags:
     - orbvi
   rules: *ros_build_rules
+
+public_mirror:
+  stage: publish
+  image:
+    name: ${DOCKER_CLI_IMAGE}
+    entrypoint: [""]
+  tags:
+    - ubuntu
+  timeout: 30m
+  variables:
+    GIT_STRATEGY: none
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+  script:
+    - |
+      set -eu
+      if [ ! -f "${SSH_PRIVATE_KEY:-}" ]; then
+        echo "ERROR: configure protected group File variable SSH_PRIVATE_KEY." >&2
+        exit 1
+      fi
+      chmod 600 "${SSH_PRIVATE_KEY}"
+      mirror_dir="$(mktemp -d)"
+      trap 'rm -rf "${mirror_dir}"' EXIT HUP INT TERM
+      known_hosts="${mirror_dir}/known_hosts"
+      printf '%s\n' \
+        'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+        'gitee.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEKxHSJ7084RmkJ4YdEi5tngynE8aZe2uEoVVsB/OvYN' \
+        > "${known_hosts}"
+      export GIT_SSH_COMMAND="ssh -i ${SSH_PRIVATE_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${known_hosts}"
+      git clone --mirror "${CI_REPOSITORY_URL}" "${mirror_dir}/repository.git"
+      cd "${mirror_dir}/repository.git"
+      git remote add github "git@github.com:ORBVI/${CI_PROJECT_NAME}.git"
+      git remote add gitee "git@gitee.com:orbvi/${CI_PROJECT_NAME}.git"
+      for target in github gitee; do
+        git push --prune "${target}" \
+          "+refs/heads/${CI_DEFAULT_BRANCH}:refs/heads/${CI_DEFAULT_BRANCH}" \
+          '+refs/tags/*:refs/tags/*'
+      done

@@ -16,6 +16,7 @@ enum class StreamId : std::uint16_t {
   Disparity = 6,
   VioPose = 7,
   PanoDisplay = 8,
+  BevDisplay = 9,
 };
 
 enum class FrameFormat : std::uint16_t {
@@ -31,6 +32,7 @@ enum class FrameFormat : std::uint16_t {
   Disparity16UQ8 = 7,
   VioPose = 8,
   PanoDisplayJpeg = 9,
+  BevDisplayJpeg = 10,
   Reserved = 65535,
 };
 
@@ -39,6 +41,13 @@ enum class Compression : std::uint16_t {
   Jpeg = 1,
   Mjpeg = 2,
   Reserved = 65535,
+};
+
+enum class TimestampDomain : std::uint8_t {
+  Unknown = 0,
+  Monotonic = 1,
+  Realtime = 2,
+  Sensor = 3,
 };
 
 enum class SdkErrorCode {
@@ -97,11 +106,13 @@ class Result<void> {
 const char* ToString(StreamId stream_id);
 const char* ToString(FrameFormat format);
 const char* ToString(Compression compression);
+const char* ToString(TimestampDomain timestamp_domain);
 const char* ToString(SdkErrorCode code);
 
 bool ParseStreamId(const std::string& name, StreamId* out);
 bool ParseFrameFormat(const std::string& name, FrameFormat* out);
 bool ParseCompression(const std::string& name, Compression* out);
+bool ParseTimestampDomain(const std::string& name, TimestampDomain* out);
 FrameFormat ExpectedFormatForStream(StreamId stream_id);
 bool IsImageStream(StreamId stream_id);
 bool IsImageFormat(FrameFormat format);

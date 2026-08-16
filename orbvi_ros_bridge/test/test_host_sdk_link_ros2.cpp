@@ -44,6 +44,45 @@ TEST(OrbviRosBridgeHostSdkLink, PublicStreamParsingIsHostSdkApi) {
   EXPECT_TRUE(orbvi_ros_bridge::IsBridgePanoramaToken("pano"));
   EXPECT_TRUE(orbvi_ros_bridge::IsBridgePanoramaToken("pano_display_stream"));
   EXPECT_FALSE(orbvi_ros_bridge::ParseBridgeStream("pano", &stream));
+  EXPECT_TRUE(orbvi_ros_bridge::IsBridgeBevToken("bev_display_stream"));
+  EXPECT_FALSE(orbvi_ros_bridge::ParseBridgeStream("bev", &stream));
+  EXPECT_TRUE(orbvi_ros_bridge::IsBridgeImageStream(orbvi_sdk::StreamId::BevDisplay));
+}
+
+TEST(OrbviRosBridgeDisplayFallback, OnlyUnsupportedStreamsUseHostDerivation) {
+  orbvi_sdk::SdkError error;
+  error.code = orbvi_sdk::SdkErrorCode::UnsupportedStream;
+  EXPECT_TRUE(orbvi_ros_bridge::ShouldFallbackToHostDisplay(error));
+
+  error.code = orbvi_sdk::SdkErrorCode::Timeout;
+  EXPECT_FALSE(orbvi_ros_bridge::ShouldFallbackToHostDisplay(error));
+
+  error.code = orbvi_sdk::SdkErrorCode::StreamBlocked;
+  EXPECT_FALSE(orbvi_ros_bridge::ShouldFallbackToHostDisplay(error));
+}
+
+TEST(OrbviRosBridgeBoardDisplay, DecodedBevMapsToRosImage) {
+  orbvi_sdk::FrameDelivery delivery;
+  delivery.frame.header.stream_id = orbvi_sdk::StreamId::BevDisplay;
+
+  orbvi_sdk::OwnedDecodedImage decoded;
+  decoded.pixel_format = orbvi_sdk::PixelFormat::Bgr888;
+  decoded.width = 2;
+  decoded.height = 1;
+  decoded.stride = 6;
+  decoded.timestamp_ns = 123456789;
+  decoded.data = {1, 2, 3, 4, 5, 6};
+  delivery.decoded_image = decoded;
+
+  sensor_msgs::msg::Image message;
+  ASSERT_TRUE(orbvi_ros_bridge::MakeBoardDisplayImageMessage(
+      delivery, "orbvi/bev", &message));
+  EXPECT_EQ(message.header.frame_id, "orbvi/bev");
+  EXPECT_EQ(message.width, 2u);
+  EXPECT_EQ(message.height, 1u);
+  EXPECT_EQ(message.encoding, "bgr8");
+  EXPECT_EQ(message.step, 6u);
+  EXPECT_EQ(message.data, decoded.data);
 }
 
 TEST(OrbviRosBridgePanoramaImages, HostSdkPanoramaRoutesToImageTopic) {

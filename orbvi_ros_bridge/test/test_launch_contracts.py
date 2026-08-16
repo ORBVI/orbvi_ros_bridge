@@ -10,7 +10,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 VISUAL_STREAMS = "raw,rectified,imu,disparity,depth,vio"
 MID360_STREAMS = "raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio"
-PANO_STREAMS = "raw,rectified,pano,imu,disparity,depth,vio"
+PANO_STREAMS = "raw,rectified,pano,bev,imu,disparity,depth,vio"
 
 ROS1_USER_LAUNCHES = {
     "orbvi_ros_bridge.launch": VISUAL_STREAMS,
@@ -137,11 +137,13 @@ class LaunchContractTest(unittest.TestCase):
         for launch_name, expected_streams in ROS1_USER_LAUNCHES.items():
             with self.subTest(launch_name=launch_name):
                 path = PACKAGE_ROOT / "launch" / launch_name
+                expected_arguments = dict(USER_ARGUMENT_DEFAULTS)
+                expected_arguments["streams"] = expected_streams
                 self.assertEqual(
                     ros1_arg_defaults(path),
-                    USER_ARGUMENT_DEFAULTS,
+                    expected_arguments,
                 )
-                self.assertEqual(ros1_param_value(path, "streams"), expected_streams)
+                self.assertEqual(ros1_param_value(path, "streams"), "$(arg streams)")
                 self.assertEqual(
                     ros1_param_value(path, "depth_viz_show_grid_values"),
                     "$(arg depth_viz_show_grid_values)",
@@ -169,14 +171,17 @@ class LaunchContractTest(unittest.TestCase):
         for launch_name, expected_streams in ROS2_USER_LAUNCHES.items():
             with self.subTest(launch_name=launch_name):
                 path = PACKAGE_ROOT / "launch" / "ros2" / launch_name
+                expected_arguments = dict(USER_ARGUMENT_DEFAULTS)
+                expected_arguments["streams"] = expected_streams
                 self.assertEqual(
                     ros2_argument_defaults(path),
-                    USER_ARGUMENT_DEFAULTS,
+                    expected_arguments,
                 )
                 parameters = ros2_dict_assignment(path, "DEFAULT_BRIDGE_PARAMETERS")
                 self.assertEqual(parameters["streams"], expected_streams)
                 source = path.read_text(encoding="utf-8")
                 self.assertIn("LaunchConfiguration(\"host\")", source)
+                self.assertIn("LaunchConfiguration(\"streams\")", source)
                 self.assertIn("LaunchConfiguration(\"publish_ipm\")", source)
                 self.assertIn(
                     "LaunchConfiguration(\n        \"depth_viz_show_grid_values\")",

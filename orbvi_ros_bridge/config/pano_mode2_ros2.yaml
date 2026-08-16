@@ -1,4 +1,4 @@
-# Four-fisheye RGB panorama: fixed seam-ROI MultiBand with calibrated rotations.
+# Board panorama expected geometry and Host fallback stitching policy.
 # These parameters are used only when streams includes pano.
 /**:
   ros__parameters:

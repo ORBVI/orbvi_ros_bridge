@@ -7,6 +7,7 @@ from launch_ros.substitutions import FindPackageShare
 
 ARGUMENT_DEFAULTS = {
     "host": "127.0.0.1",
+    "streams": "raw,rectified,imu,disparity,depth,vio",
     "publish_lidar_pcl": "false",
     "publish_ipm": "false",
     "depth_viz_show_grid_values": "false",
@@ -30,6 +31,7 @@ def bridge_launch_description(parameters, extra_parameter_files=None):
     node_parameters.append(parameters)
     return LaunchDescription([
         DeclareLaunchArgument("host", default_value=ARGUMENT_DEFAULTS["host"]),
+        DeclareLaunchArgument("streams", default_value=ARGUMENT_DEFAULTS["streams"]),
         DeclareLaunchArgument(
             "publish_lidar_pcl",
             default_value=ARGUMENT_DEFAULTS["publish_lidar_pcl"]),
@@ -65,6 +67,7 @@ def bridge_launch_description(parameters, extra_parameter_files=None):
 def generate_launch_description():
     parameters = dict(DEFAULT_BRIDGE_PARAMETERS)
     parameters["host"] = LaunchConfiguration("host")
+    parameters["streams"] = LaunchConfiguration("streams")
     parameters["publish_lidar_pcl"] = LaunchConfiguration("publish_lidar_pcl")
     parameters["publish_ipm"] = LaunchConfiguration("publish_ipm")
     parameters["depth_viz_show_grid_values"] = LaunchConfiguration(

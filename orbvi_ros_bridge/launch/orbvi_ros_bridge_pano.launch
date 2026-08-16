@@ -1,8 +1,9 @@
 <launch>
-  <!-- Panorama entry: visual topics plus Host SDK panorama. -->
+  <!-- Board-preferred panorama and BEV, with Host derivation only if unsupported. -->
   <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
+  <arg name="streams" default="raw,rectified,pano,bev,imu,disparity,depth,vio" doc="Comma-separated bridge streams"/>
   <arg name="publish_lidar_pcl" default="false" doc="Publish Livox CustomMsg as sensor_msgs/PointCloud2 on topic_prefix/lidar/points"/>
-  <arg name="publish_ipm" default="false" doc="Publish four-camera 360-degree ground-plane BEV on topic_prefix/ipm/image"/>
+  <arg name="publish_ipm" default="false" doc="Request board-preferred BEV on topic_prefix/ipm/image"/>
   <arg name="depth_viz_show_grid_values" default="false" doc="Draw a 5x5 grid with metric depth values on each directional depth visualization"/>
   <arg name="publish_vio_path" default="true" doc="Publish bounded optimized VIO trajectory on topic_prefix/vio/path"/>
   <arg name="vio_path_max_poses" default="2000" doc="Maximum number of poses retained in the VIO Path message"/>
@@ -16,7 +17,7 @@
     <param name="publish_vio_path" value="$(arg publish_vio_path)"/>
     <param name="vio_path_max_poses" value="$(arg vio_path_max_poses)"/>
     <param name="vio_path_publish_rate_hz" value="$(arg vio_path_publish_rate_hz)"/>
-    <param name="streams" value="raw,rectified,pano,imu,disparity,depth,vio"/>
+    <param name="streams" value="$(arg streams)"/>
     <rosparam command="load" file="$(find orbvi_ros_bridge)/config/pano_mode2.yaml"/>
   </node>
 </launch>

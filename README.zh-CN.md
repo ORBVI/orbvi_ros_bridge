@@ -4,7 +4,7 @@
 
 ORBVI ROS Bridge 通过 ORBVI Host SDK 将 ORBVI 设备数据发布到 ROS1 或 ROS2。
 它面向需要在 Linux 主机上获取相机、IMU、MID360 LiDAR、视差、Host 侧深度、
-Host 侧全景和 VIO topic 的应用开发者。
+板端全景/BEV 和 VIO topic 的应用开发者。
 
 仓库包含：
 
@@ -37,8 +37,8 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 | `/orbvi/raw/camera_<id>/image/compressed` | `sensor_msgs/CompressedImage` | 原始鱼眼压缩图像 transport |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | 开启 decoded 时发布的校正图像 |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | 校正后的 stereo pair 压缩图像 transport |
-| `/orbvi/pano/image` | `sensor_msgs/Image` | `streams` 包含 `pano` 时，由 Host SDK 从 `raw_fisheye_stream` 拼接出的全景图 |
-| `/orbvi/ipm/image` | `sensor_msgs/Image` | 四路鱼眼投影到地平面并融合的 360° BEV，`bgr8` |
+| `/orbvi/pano/image` | `sensor_msgs/Image` | 优先发布板端 `pano_display_stream`；仅板端明确不支持时才由 Host 派生 |
+| `/orbvi/ipm/image` | `sensor_msgs/Image` | 优先发布板端 `bev_display_stream`（`1000x1000`、`bgr8`、目标 20 Hz）；仅板端明确不支持时才由 Host 派生 |
 | `/orbvi/imu` | `sensor_msgs/Imu` | 设备 IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 点云流 |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU 流 |
@@ -137,7 +137,7 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
 
-启用四路鱼眼 360° IPM：
+启用板端优先的四路鱼眼 360° BEV/IPM：
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
@@ -146,11 +146,11 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
   host:=<device-ip> publish_ipm:=true
 ```
 
-IPM 默认假设四个相机离地 1.0 m，并分别水平朝向前、右、后、左。输出以
-`base_link` 为坐标系，图像上方为车体前方、左侧为车体左方；默认覆盖车体周围
-20 m × 20 m，分辨率 0.02 m/px，输出 1000×1000，最大发布频率 5 Hz。启动时依据
-设备标定预计算映射、接缝权重及逐帧融合均在 `liborbvi_sdk` 内完成；Bridge 只负责
-ROS 参数、发布节流和图像发布。
+Bridge 先订阅板端 `bev_display_stream`，Host 只把板端 JPEG 解码为 `1000x1000`
+`bgr8` ROS Image，板端目标频率为 20 Hz。仅设备明确返回该流不支持时才启用
+Host 回退：默认假设四个相机离地 1.0 m，覆盖车体周围 20 m × 20 m，以
+0.02 m/px 生成 1000x1000 BGR，最高 5 Hz。超时、流被阻塞或运行时故障都不会
+触发板外派生。
 
 如需在四方向深度可视化图中绘制 5×5 网格，并显示每个网格交点的深度值，启用
 `depth_viz_show_grid_values`：
@@ -174,17 +174,18 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
 ```
 
-视觉数据、深度、VIO 和 Host 侧全景：
+视觉数据、深度、VIO、板端优先全景和板端优先 BEV：
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_pano.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 ```
 
-公开 topic 固定在 `/orbvi` 下。全景入口使用内置 `config/pano_mode2.yaml` /
-`config/pano_mode2_ros2.yaml` 默认配置。默认以 2048x1024 完整角度画布投影，
-上下各裁 200 行后发布 2048x624 图像；默认使用固定接缝、4 层 MultiBand，以及
-鱼眼旋转/平移外参和可调的 2.0 m 有限拼接半径。物理相机映射固定为
+公开 topic 固定在 `/orbvi` 下。全景入口先请求板端 `pano_display_stream` 和
+`bev_display_stream`；只有板端返回 `UnsupportedStream` 才启用对应 Host 回退。
+内置 `config/pano_mode2.yaml` / `config/pano_mode2_ros2.yaml` 既定义板端全景预期
+几何，也定义完整 Host 回退策略。Host 回退以 2048x1024 完整角度画布投影，
+上下各裁 200 行后发布 2048x624 图像。物理相机映射固定为
 `front=3、right=2、rear=4、left=5`。Host SDK 已将 RGB 与 rig 深度全景统一为
 `[0, 2*pi)` 方位契约，Bridge 仅复制图像，不再执行相位调整。
 公开 `/orbvi/depth/panorama` 恢复为按输出像素反向查表：查表仅在标定加载时构建一次，
@@ -276,23 +277,25 @@ scripts/orbvi_ros_bridge_rate_check.sh \
 
 ## Launch 文件
 
-对外接口固定为三套 launch 配置；stream 组合和参考配置保留在 launch 文件内部。
+对外接口固定为三套 launch 配置；每套 launch 提供对应工作流的 `streams` 默认值，
+调用方可以覆盖。
 
 | 能力 | ROS1 launch | ROS2 launch | 首要检查 topic |
 | --- | --- | --- | --- |
 | 视觉、深度和 VIO | `orbvi_ros_bridge.launch` | `orbvi_ros_bridge.launch.py` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
 | 视觉、深度、VIO 和 MID360 | `orbvi_ros_bridge_mid360.launch` | `orbvi_ros_bridge_mid360.launch.py` | `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
-| 视觉、深度、VIO 和全景 | `orbvi_ros_bridge_pano.launch` | `orbvi_ros_bridge_pano.launch.py` | `/orbvi/pano/image` |
+| 视觉、深度、VIO、全景和 BEV | `orbvi_ros_bridge_pano.launch` | `orbvi_ros_bridge_pano.launch.py` | `/orbvi/pano/image`, `/orbvi/ipm/image` |
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI 设备 IP 或 hostname |
+| `streams` | 随 launch 变化 | 逗号分隔的 stream token；`pano`、`bev` 表示板端优先显示流 |
 | `publish_lidar_pcl` | `false` | 额外将 Livox `CustomMsg` 转换并发布到 `/orbvi/lidar/points` |
-| `publish_ipm` | `false` | 发布四路鱼眼融合的 `/orbvi/ipm/image` |
-| `ipm_camera_height_m` | `1.0` | 四个水平相机相对地面的假定高度 |
-| `ipm_extent_m` | `10.0` | BEV 从车体中心向前、后、左、右各覆盖的距离 |
-| `ipm_resolution_m_per_pixel` | `0.02` | BEV 米/像素；输出边长为 `2*extent/resolution`，最大 4096 |
-| `ipm_max_publish_rate_hz` | `5.0` | BEV 最大发布频率；0 表示不节流 |
+| `publish_ipm` | `false` | 请求板端优先的 `/orbvi/ipm/image`，是 `bev` token 的兼容开关 |
+| `ipm_camera_height_m` | `1.0` | Host 回退使用的相机离地高度 |
+| `ipm_extent_m` | `10.0` | Host 回退使用的 BEV 覆盖范围 |
+| `ipm_resolution_m_per_pixel` | `0.02` | Host 回退使用的米/像素；输出边长为 `2*extent/resolution`，最大 4096 |
+| `ipm_max_publish_rate_hz` | `5.0` | Host 回退最大发布频率；0 表示不节流 |
 | `ipm_frame_id` | `base_link` | BEV 图像 header 的坐标系 |
 | `depth_viz_show_grid_values` | `false` | 在每路方向深度可视化图上绘制 5×5 网格及网格交点米制深度值 |
 | `publish_vio_path` | `true` | 将优化后的 `/orbvi/vio/odometry` 累计并发布到 `/orbvi/vio/path` |

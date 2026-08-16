@@ -31,6 +31,7 @@ namespace {
 
 struct IpmOptions : orbvi_sdk::BirdsEyeViewOptions {
   bool enabled = false;
+  bool host_fallback_active = false;
   double max_publish_rate_hz = 5.0;
 };
 
@@ -294,7 +295,10 @@ class BridgeNode::Impl {
     }
 
     PrepareDepthPublisher();
-    PrepareIpmPublisher();
+    if (!PrepareIpmPublisher()) {
+      Stop();
+      return false;
+    }
     StartDepthDerivedWorker();
 
     for (const auto stream : config_.streams) {
@@ -467,16 +471,6 @@ class BridgeNode::Impl {
 
     LoadImageMode(&config);
     LoadStreams(&config);
-    if (config.ipm.enabled) {
-      if (config.decode_mode == orbvi_sdk::DecodeMode::RawOnly) {
-        config.decode_mode = orbvi_sdk::DecodeMode::RawAndDecoded;
-        ROS_INFO("IPM output requires decoded fisheye frames; enabling SDK decode");
-      }
-      if (!HasStream(config.streams, orbvi_sdk::StreamId::RawFisheye)) {
-        config.streams.push_back(orbvi_sdk::StreamId::RawFisheye);
-        ROS_INFO("IPM output requires raw_fisheye_stream; subscribing it");
-      }
-    }
     LoadDepthOptions(&config);
     LoadPanoramaOptions(&config);
     bool publish_depth_bool = false;
@@ -580,6 +574,10 @@ class BridgeNode::Impl {
         config->publish_panorama = true;
         continue;
       }
+      if (IsBridgeBevToken(token)) {
+        config->ipm.enabled = true;
+        continue;
+      }
       orbvi_sdk::StreamId stream = orbvi_sdk::StreamId::Unknown;
       if (ParseBridgeStream(item, &stream) && stream != orbvi_sdk::StreamId::Unknown) {
         config->streams.push_back(stream);
@@ -587,7 +585,8 @@ class BridgeNode::Impl {
         ROS_WARN_STREAM("Ignoring unsupported stream name: " << item);
       }
     }
-    if (config->streams.empty() && !config->publish_depth && !config->publish_panorama) {
+    if (config->streams.empty() && !config->publish_depth &&
+        !config->publish_panorama && !config->ipm.enabled) {
       ROS_WARN("No valid streams configured; falling back to default bridge streams");
       config->streams = DefaultConfig().streams;
     }
@@ -1028,44 +1027,84 @@ class BridgeNode::Impl {
         << config_.pointcloud_options.max_disparity_jump_px);
   }
 
-  void PrepareIpmPublisher() {
+  bool PrepareIpmPublisher() {
     ipm_generator_ = orbvi_sdk::BirdsEyeViewGenerator();
     last_ipm_publish_time_ = std::chrono::steady_clock::time_point();
     if (!config_.ipm.enabled) {
-      return;
+      return true;
     }
+
+    orbvi_sdk::SubscribeOptions board_options;
+    board_options.decode_policy.mode = orbvi_sdk::DecodeMode::RawAndDecoded;
+    board_options.decode_policy.max_decode_queue_depth = config_.max_decode_queue_depth;
+    board_options.decode_policy.max_decode_latency_ms = config_.max_decode_latency_ms;
+    board_options.max_receive_queue_depth = config_.max_receive_queue_depth;
+    board_options.first_frame_timeout_ms = config_.first_frame_timeout_ms;
+    board_options.require_streaming_transport = config_.require_streaming_transport;
+    board_options.allow_sample_endpoint_fallback = config_.allow_sample_endpoint_fallback;
+    auto board_result = client_->subscribe(
+        orbvi_sdk::StreamId::BevDisplay,
+        board_options,
+        [this](const orbvi_sdk::FrameDelivery& delivery) {
+          PublishBoardIpm(delivery);
+        });
+    if (board_result) {
+      subscriptions_.push_back(std::move(board_result.value()));
+      ROS_INFO_STREAM(
+          "Subscribed board BEV stream bev_display_stream on "
+          << JoinTopic(config_.topic_prefix, "ipm/image"));
+      return true;
+    }
+    if (!ShouldFallbackToHostDisplay(board_result.error())) {
+      ROS_ERROR_STREAM(
+          "Board BEV subscribe failed; Host fallback is only allowed for unsupported streams: "
+          << board_result.error().message);
+      return false;
+    }
+
+    ROS_WARN_STREAM(
+        "Board does not support bev_display_stream; enabling Host-derived IPM fallback: "
+        << board_result.error().message);
+    config_.ipm.host_fallback_active = true;
+    if (config_.decode_mode == orbvi_sdk::DecodeMode::RawOnly) {
+      config_.decode_mode = orbvi_sdk::DecodeMode::RawAndDecoded;
+      ROS_INFO("Host IPM fallback requires decoded fisheye frames; enabling SDK decode");
+    }
+    if (!HasStream(config_.streams, orbvi_sdk::StreamId::RawFisheye)) {
+      config_.streams.push_back(orbvi_sdk::StreamId::RawFisheye);
+      ROS_INFO("Host IPM fallback requires raw_fisheye_stream; subscribing it");
+    }
+
     auto calibration_status = client_->getCalibration("");
     if (!calibration_status) {
       ROS_ERROR_STREAM(
-          "IPM output disabled: failed to fetch ORBVI calibration: "
+          "Host IPM fallback failed to fetch ORBVI calibration: "
           << calibration_status.error().message);
-      config_.ipm.enabled = false;
-      return;
+      return false;
     }
     auto calibration =
         orbvi_sdk::MakePanoramaCalibration(calibration_status.value());
     if (!calibration) {
       ROS_ERROR_STREAM(
-          "IPM output disabled: invalid fisheye calibration: "
+          "Host IPM fallback has invalid fisheye calibration: "
           << calibration.error().message);
-      config_.ipm.enabled = false;
-      return;
+      return false;
     }
     const auto initialized =
         ipm_generator_.Initialize(calibration.value(), config_.ipm);
     if (!initialized) {
       ROS_ERROR_STREAM(
-          "IPM output disabled: " << initialized.error().message);
-      config_.ipm.enabled = false;
-      return;
+          "Host IPM fallback initialization failed: " << initialized.error().message);
+      return false;
     }
     ROS_INFO_STREAM(
-        "IPM output enabled on " << JoinTopic(config_.topic_prefix, "ipm/image")
+        "Host-derived IPM fallback enabled on " << JoinTopic(config_.topic_prefix, "ipm/image")
         << ", size=" << ipm_generator_.width() << "x" << ipm_generator_.height()
         << ", extent_m=" << config_.ipm.extent_m
         << ", resolution_m_per_pixel=" << config_.ipm.resolution_m_per_pixel
         << ", camera_height_m=" << config_.ipm.camera_height_m
         << ", max_publish_rate_hz=" << config_.ipm.max_publish_rate_hz);
+    return true;
   }
 
   void StartDepthDerivedWorker() {
@@ -1224,22 +1263,51 @@ class BridgeNode::Impl {
     options.allow_sample_endpoint_fallback = config_.allow_sample_endpoint_fallback;
     options.include_source_frame = false;
 
-    auto result = client_->subscribePanorama(
-        options,
-        [this](std::uint64_t rgb_timestamp_ns) {
-          return ClosestPanoramaDepth(rgb_timestamp_ns);
-        },
+    const orbvi_sdk::PanoramaFrameCallback callback =
         [this](const orbvi_sdk::PanoramaFrameDelivery& delivery) {
           PublishPanorama(delivery);
-        });
-    if (!result) {
+        };
+    auto board_result = client_->subscribePanorama(
+        orbvi_sdk::PanoramaSourceMode::BoardOnly,
+        options,
+        callback);
+    if (board_result) {
+      panorama_subscription_ = std::move(board_result.value());
+      ROS_INFO_STREAM(
+          "Subscribed board panorama stream pano_display_stream on "
+          << JoinTopic(config_.topic_prefix, "pano/image"));
+      return true;
+    }
+    if (!ShouldFallbackToHostDisplay(board_result.error())) {
       ROS_ERROR_STREAM(
-          "ORBVI Host SDK panorama subscribe failed: " << result.error().message);
+          "Board panorama subscribe failed; Host fallback is only allowed for unsupported streams: "
+          << board_result.error().message);
       return false;
     }
-    panorama_subscription_ = std::move(result.value());
+
+    ROS_WARN_STREAM(
+        "Board does not support pano_display_stream; enabling Host-derived panorama fallback: "
+        << board_result.error().message);
+    auto host_result = options.stitch.depth_assist
+        ? client_->subscribePanorama(
+              orbvi_sdk::PanoramaSourceMode::HostOnly,
+              options,
+              [this](std::uint64_t rgb_timestamp_ns) {
+                return ClosestPanoramaDepth(rgb_timestamp_ns);
+              },
+              callback)
+        : client_->subscribePanorama(
+              orbvi_sdk::PanoramaSourceMode::HostOnly,
+              options,
+              callback);
+    if (!host_result) {
+      ROS_ERROR_STREAM(
+          "Host panorama fallback subscribe failed: " << host_result.error().message);
+      return false;
+    }
+    panorama_subscription_ = std::move(host_result.value());
     ROS_INFO_STREAM(
-        "Subscribed Host SDK derived panorama from raw_fisheye_stream, output_size="
+        "Subscribed Host-derived panorama fallback from raw_fisheye_stream, output_size="
         << options.stitch.width << "x" << PanoramaOutputHeight(options.stitch)
         << ", full_height=" << options.stitch.height
         << ", crop_top=" << options.stitch.crop_top
@@ -1355,7 +1423,7 @@ class BridgeNode::Impl {
   void PublishIpm(
       const orbvi_sdk::FrameView& frame,
       const orbvi_sdk::FrameDelivery& delivery) {
-    if (!config_.ipm.enabled ||
+    if (!config_.ipm.enabled || !config_.ipm.host_fallback_active ||
         frame.stream_id != orbvi_sdk::StreamId::RawFisheye) {
       return;
     }
@@ -1383,6 +1451,19 @@ class BridgeNode::Impl {
     message.is_bigendian = 0;
     message.step = ipm.stride;
     message.data = ipm.data;
+    Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "ipm/image"))
+        .publish(message);
+  }
+
+  void PublishBoardIpm(const orbvi_sdk::FrameDelivery& delivery) {
+    if (!config_.ipm.enabled || config_.ipm.host_fallback_active) {
+      return;
+    }
+    sensor_msgs::Image message;
+    if (!MakeBoardDisplayImageMessage(delivery, config_.ipm.frame_id, &message)) {
+      ROS_WARN_THROTTLE(5.0, "Board BEV frame skipped: decoded image is unavailable or invalid");
+      return;
+    }
     Publisher<sensor_msgs::Image>(JoinTopic(config_.topic_prefix, "ipm/image"))
         .publish(message);
   }

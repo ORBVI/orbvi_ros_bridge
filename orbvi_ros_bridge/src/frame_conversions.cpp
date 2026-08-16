@@ -981,7 +981,9 @@ std::string JoinTopic(const std::string& prefix, std::string suffix) {
 
 bool IsBridgeImageStream(orbvi_sdk::StreamId stream) {
   return stream == orbvi_sdk::StreamId::RawFisheye ||
-         stream == orbvi_sdk::StreamId::RectifiedFisheye;
+         stream == orbvi_sdk::StreamId::RectifiedFisheye ||
+         stream == orbvi_sdk::StreamId::PanoDisplay ||
+         stream == orbvi_sdk::StreamId::BevDisplay;
 }
 
 bool IsBridgePanoramaToken(const std::string& input) {
@@ -990,6 +992,18 @@ bool IsBridgePanoramaToken(const std::string& input) {
   return name == "pano" || name == "panorama" ||
          name == "pano_display" || name == "pano_display_stream" ||
          name == "panorama_stream";
+}
+
+bool IsBridgeBevToken(const std::string& input) {
+  std::string name = LowerCopy(Trim(input));
+  std::replace(name.begin(), name.end(), '-', '_');
+  return name == "bev" || name == "ipm" || name == "birdseye" ||
+         name == "birds_eye" || name == "bev_display" ||
+         name == "bev_display_stream";
+}
+
+bool ShouldFallbackToHostDisplay(const orbvi_sdk::SdkError& error) {
+  return error.code == orbvi_sdk::SdkErrorCode::UnsupportedStream;
 }
 
 bool ParseBridgeStream(const std::string& input, orbvi_sdk::StreamId* out) {
@@ -1012,7 +1026,7 @@ bool ParseBridgeStream(const std::string& input, orbvi_sdk::StreamId* out) {
     name = "disparity_stream";
   } else if (name == "vio") {
     name = "vio_pose_stream";
-  } else if (IsBridgePanoramaToken(name)) {
+  } else if (IsBridgePanoramaToken(name) || IsBridgeBevToken(name)) {
     *out = orbvi_sdk::StreamId::Unknown;
     return false;
   }
@@ -1192,6 +1206,41 @@ bool MakePanoramaImageMessage(
   out->is_bigendian = 0;
   out->step = panorama.stride;
   out->data.assign(panorama.data, panorama.data + expected_size);
+  return true;
+}
+
+bool MakeBoardDisplayImageMessage(
+    const orbvi_sdk::FrameDelivery& delivery,
+    const std::string& fallback_frame_id,
+    sensor_msgs::Image* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  const orbvi_sdk::OwnedDecodedImage* decoded = nullptr;
+  if (delivery.decoded_image.has_value()) {
+    decoded = &delivery.decoded_image.value();
+  } else if (!delivery.decoded_images.empty()) {
+    decoded = &delivery.decoded_images.front();
+  }
+  if (decoded == nullptr || decoded->pixel_format != orbvi_sdk::PixelFormat::Bgr888 ||
+      decoded->width == 0 || decoded->height == 0 ||
+      decoded->stride < decoded->width * 3u) {
+    return false;
+  }
+  const std::size_t expected_size =
+      static_cast<std::size_t>(decoded->stride) * decoded->height;
+  if (decoded->data.size() < expected_size) {
+    return false;
+  }
+  out->header = MakeHeader(
+      decoded->timestamp_ns,
+      decoded->frame_id.empty() ? fallback_frame_id : decoded->frame_id);
+  out->height = decoded->height;
+  out->width = decoded->width;
+  out->encoding = "bgr8";
+  out->is_bigendian = 0;
+  out->step = decoded->stride;
+  out->data.assign(decoded->data.begin(), decoded->data.begin() + expected_size);
   return true;
 }
 

@@ -4,8 +4,8 @@
 
 ORBVI ROS Bridge publishes ORBVI device data into ROS1 or ROS2 through the
 ORBVI Host SDK. It is intended for application developers who need camera, IMU,
-MID360 LiDAR, disparity, Host-derived depth, Host-derived panorama and VIO
-topics on Linux hosts.
+MID360 LiDAR, disparity, Host-derived depth, board-generated panorama/BEV and
+VIO topics on Linux hosts.
 
 The repository includes:
 
@@ -40,8 +40,8 @@ for calibration and diagnostics and does not select the topic.
 | `/orbvi/raw/camera_<id>/image/compressed` | `sensor_msgs/CompressedImage` | Raw fisheye compressed image transport |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image` | `sensor_msgs/Image` | Decoded rectified image when enabled |
 | `/orbvi/rectified/<front\|right\|rear\|left>/<left\|right>/image/compressed` | `sensor_msgs/CompressedImage` | Rectified stereo pair compressed image transport |
-| `/orbvi/pano/image` | `sensor_msgs/Image` | Host SDK panorama stitched from `raw_fisheye_stream` when `pano` is enabled |
-| `/orbvi/ipm/image` | `sensor_msgs/Image` | Four-fisheye 360-degree ground-plane BEV in `bgr8` |
+| `/orbvi/pano/image` | `sensor_msgs/Image` | Board `pano_display_stream`, with Host derivation only when the board explicitly reports the stream unsupported |
+| `/orbvi/ipm/image` | `sensor_msgs/Image` | Board `bev_display_stream` ground-plane BEV (`1000x1000`, `bgr8`, target 20 Hz), with Host derivation only when the board explicitly reports the stream unsupported |
 | `/orbvi/imu` | `sensor_msgs/Imu` | Device IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 point cloud stream |
 | `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU stream |
@@ -142,7 +142,7 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
 ```
 
-Enable the four-fisheye 360-degree IPM:
+Enable the board-preferred four-fisheye 360-degree BEV/IPM:
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
@@ -151,12 +151,12 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
   host:=<device-ip> publish_ipm:=true
 ```
 
-IPM assumes four horizontal cameras at 1.0 m above the ground, facing front,
-right, rear and left. In the `base_link` output, image top is vehicle-forward
-and image left is vehicle-left. Defaults cover 20 m x 20 m at 0.02 m/pixel,
-producing 1000x1000 BGR at up to 5 Hz. TS-fisheye maps and seam weights are
-precomputed and applied inside `liborbvi_sdk`; the Bridge only handles ROS
-parameters, rate limiting and image publication.
+The Bridge first subscribes the board-generated `bev_display_stream` and only
+decodes its JPEG into a `1000x1000` `bgr8` ROS image. The board target rate is
+20 Hz. If the device explicitly reports that stream as unsupported, the Host
+fallback assumes four horizontal cameras at 1.0 m above the ground and generates
+a 20 m x 20 m, 0.02 m/pixel, 1000x1000 BGR image at up to 5 Hz. Timeouts, blocked
+streams and runtime failures do not activate Host derivation.
 
 To draw a 5x5 grid and the depth at every grid intersection on all four
 directional depth visualizations, enable `depth_viz_show_grid_values`:
@@ -183,19 +183,21 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
 ```
 
-Visual data, depth, VIO and Host-derived panorama:
+Visual data, depth, VIO, board-preferred panorama and board-preferred BEV:
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_pano.launch host:=<device-ip>
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
 ```
 
-Public topic names are fixed under `/orbvi`. The panorama launch uses the
-bundled `config/pano_mode2.yaml` / `config/pano_mode2_ros2.yaml` defaults. It
-projects a 2048x1024 angular canvas, crops 200 rows at the top and bottom, and
-publishes 2048x624 fixed-seam, four-level MultiBand output using the calibrated
-fisheye rotations and translations with a configurable 2.0 m finite stitching
-radius. The physical mapping is fixed as `front=3`, `right=2`,
+Public topic names are fixed under `/orbvi`. The panorama launch first requests
+the board `pano_display_stream` and `bev_display_stream`. Only a board response
+of `UnsupportedStream` enables the matching Host-derived fallback. The bundled
+`config/pano_mode2.yaml` / `config/pano_mode2_ros2.yaml` geometry is used as the
+expected board panorama layout and as the complete Host fallback policy. The
+Host fallback projects a 2048x1024 angular canvas, crops 200 rows at the top and
+bottom, and publishes 2048x624 fixed-seam, four-level MultiBand output. The
+physical mapping is fixed as `front=3`, `right=2`,
 `rear=4`, `left=5`. The Host SDK normalizes RGB and rig depth panoramas to the
 same `[0, 2*pi)` azimuth contract, so the Bridge copies both images without
 phase adjustment. The public `/orbvi/depth/panorama` image uses a cached
@@ -296,23 +298,25 @@ Outputs are written to a timestamped directory:
 ## Launch Files
 
 The public interface is intentionally limited to three launch configurations.
-Stream selection and reference settings are kept inside the launch file.
+Each launch provides a workflow-specific `streams` default that callers may
+override.
 
 | Capability | ROS1 launch | ROS2 launch | First topics to check |
 | --- | --- | --- | --- |
 | Visual, depth and VIO | `orbvi_ros_bridge.launch` | `orbvi_ros_bridge.launch.py` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
 | Visual, depth, VIO and MID360 | `orbvi_ros_bridge_mid360.launch` | `orbvi_ros_bridge_mid360.launch.py` | `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
-| Visual, depth, VIO and panorama | `orbvi_ros_bridge_pano.launch` | `orbvi_ros_bridge_pano.launch.py` | `/orbvi/pano/image` |
+| Visual, depth, VIO, panorama and BEV | `orbvi_ros_bridge_pano.launch` | `orbvi_ros_bridge_pano.launch.py` | `/orbvi/pano/image`, `/orbvi/ipm/image` |
 
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
+| `streams` | Launch-specific | Comma-separated stream tokens; `pano` and `bev` select board-preferred display outputs |
 | `publish_lidar_pcl` | `false` | Also convert Livox `CustomMsg` to `/orbvi/lidar/points` |
-| `publish_ipm` | `false` | Publish the four-fisheye `/orbvi/ipm/image` |
-| `ipm_camera_height_m` | `1.0` | Assumed height of the four horizontal cameras |
-| `ipm_extent_m` | `10.0` | Coverage from vehicle center in each cardinal direction |
-| `ipm_resolution_m_per_pixel` | `0.02` | BEV meters per pixel; side is `2*extent/resolution`, capped at 4096 |
-| `ipm_max_publish_rate_hz` | `5.0` | Maximum BEV rate; zero disables throttling |
+| `publish_ipm` | `false` | Alias for requesting board-preferred `/orbvi/ipm/image` output |
+| `ipm_camera_height_m` | `1.0` | Host fallback camera height |
+| `ipm_extent_m` | `10.0` | Host fallback coverage from vehicle center in each cardinal direction |
+| `ipm_resolution_m_per_pixel` | `0.02` | Host fallback BEV meters per pixel; side is `2*extent/resolution`, capped at 4096 |
+| `ipm_max_publish_rate_hz` | `5.0` | Host fallback maximum rate; zero disables throttling |
 | `ipm_frame_id` | `base_link` | Frame id stored in the BEV image header |
 | `depth_viz_show_grid_values` | `false` | Draw a 5x5 grid and metric grid-point values on each directional depth visualization |
 | `publish_vio_path` | `true` | Accumulate optimized `/orbvi/vio/odometry` and publish `/orbvi/vio/path` |

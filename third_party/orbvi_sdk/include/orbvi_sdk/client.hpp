@@ -8,11 +8,23 @@
 #include <vector>
 
 #include "orbvi_sdk/frame.hpp"
+#include "orbvi_sdk/lidar_calibration.hpp"
+#include "orbvi_sdk/livox.hpp"
 #include "orbvi_sdk/image.hpp"
 #include "orbvi_sdk/depth.hpp"
 #include "orbvi_sdk/panorama.hpp"
+#include "orbvi_sdk/transport_options.hpp"
+#include "orbvi_sdk/uvc_contract.hpp"
 
 namespace orbvi_sdk {
+
+class BulkReader;
+class UvcReader;
+
+namespace detail {
+class BulkOtaRuntime;
+class ClientTestPeer;
+}
 
 struct ClientOptions {
   std::string host = "127.0.0.1";
@@ -25,6 +37,24 @@ struct ClientOptions {
   std::uint32_t ota_preferred_chunk_bytes = 4u * 1024u * 1024u;
   bool ota_low_memory_upload = false;
   std::uint32_t ota_finalize_timeout_ms = 180000;
+  // Dual-transport selection (Chapter 1). Defaults to Network for both, which
+  // is fully backward-compatible with the existing network-only client. UVC
+  // is an explicit Linux V4L2 transport; protocol Bulk and Bulk OTA use
+  // distinct exact USB interfaces.
+  DeviceOptions device_options;
+  // Selects one USB composite parent. Child UVC functions are resolved by
+  // iInterface. UvcVendorBulk requires paired video+metadata nodes; UvcOnly
+  // binds the single video node without inventing FrameSync metadata.
+  // Protocol Bulk requires exact nonzero VID/PID and a nonempty iSerial. The
+  // SDK never falls back to Network when this identity is absent or rejected.
+  UsbCompositeSelector usb_selector;
+  // Backward-compatible selector hint. If set, this must identify the USB
+  // composite sysfs parent. A single /dev/videoN child is ambiguous and is
+  // rejected before any control-plane probe.
+  std::string usb_device_path;
+  // UvcOnly has no control identity: explicitly select the physical layout.
+  // UvcVendorBulk discovers 4P from device info instead.
+  std::string uvc_only_raw_layout = kRawAtlasLayout;
 };
 
 struct SubscribeOptions {
@@ -38,7 +68,6 @@ struct SubscribeOptions {
 struct DeviceInfo {
   std::string device_name;
   std::string release_profile;
-  std::string camera_profile;
   std::string product;
   std::string device_model;
   std::string hardware_profile;
@@ -46,6 +75,7 @@ struct DeviceInfo {
   std::string protocol_version;
   std::vector<std::string> supported_streams;
   std::vector<std::string> unsupported_streams;
+  std::string raw_json;
 };
 
 struct StreamStatus {
@@ -266,6 +296,11 @@ class Client {
   Result<DeviceStatus> getStatus();
   Result<TimeStatus> getTimeStatus();
   Result<CalibrationStatus> getCalibration(const std::string& version = "");
+  // Returns board-declared LiDAR IMU units, separate from factory calibration.
+  Result<LidarImuParameters> getLidarImuParameters();
+  // Fetches the device calibration bundle and exposes the factory
+  // LiDAR/camera transforms as typed data instead of requiring JSON parsing.
+  Result<LidarCalibration> getLidarCalibration(const std::string& version = "");
   Result<OtaProgress> getOtaProgress();
   Result<std::string> getOtaLog();
   Result<OtaCommandResult> beginOta(const std::string& package_path);
@@ -306,6 +341,31 @@ class Client {
       PanoramaFrameCallback callback);
 
  private:
+  friend class detail::ClientTestPeer;
+
+  // Private production-path test seam. Tests inject a BulkReader carrying a
+  // fake UsbBackend; normal callers always use the public constructor and the
+  // default libusb backend.
+  Client(
+      ClientOptions options,
+      std::function<void(BulkReader*)> prepare_bulk_reader_for_open,
+      std::function<void(detail::BulkOtaRuntime*)>
+          prepare_bulk_ota_for_open = {});
+  // Private production-path test seam for a fake V4L2 backend. Normal callers
+  // always use the public constructor and dynamic composite discovery.
+  Client(
+      ClientOptions options,
+      std::function<void(UvcReader*)> prepare_uvc_reader_for_open);
+  // Private pure-USB production-path test seam. It lets one test exercise the
+  // real UVC + Vendor Bulk profile while injecting all three hardware-facing
+  // backends; normal callers cannot construct mixed transport states.
+  Client(
+      ClientOptions options,
+      std::function<void(BulkReader*)> prepare_bulk_reader_for_open,
+      std::function<void(detail::BulkOtaRuntime*)>
+          prepare_bulk_ota_for_open,
+      std::function<void(UvcReader*)> prepare_uvc_reader_for_open);
+
   class Impl;
   std::unique_ptr<Impl> impl_;
 };

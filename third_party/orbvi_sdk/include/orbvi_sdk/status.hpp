@@ -17,6 +17,8 @@ enum class StreamId : std::uint16_t {
   VioPose = 7,
   PanoDisplay = 8,
   BevDisplay = 9,
+  Bev = BevDisplay,
+  FrameSync = 10,
 };
 
 enum class FrameFormat : std::uint16_t {
@@ -33,6 +35,9 @@ enum class FrameFormat : std::uint16_t {
   VioPose = 8,
   PanoDisplayJpeg = 9,
   BevDisplayJpeg = 10,
+  BevMjpeg = BevDisplayJpeg,
+  RawAtlasMjpeg = 11,
+  FrameSyncV2 = 12,
   Reserved = 65535,
 };
 
@@ -63,6 +68,19 @@ enum class SdkErrorCode {
   DecodeFailed,
   ResourceLimit,
   NotConnected,
+  ImageTransportUnavailable,
+  ProtocolTransportUnavailable,
+  UsbSuperspeedRequired,
+  BandwidthExhausted,
+  FrameSyncUnavailable,
+  DeviceReenumerating,
+  DeviceIdentityMismatch,
+  RecordingIoError,
+  RecordingIncomplete,
+  RecordingCapabilityUnavailable,
+  CalibrationInvalidInput,
+  CalibrationFailed,
+  CalibrationIoError,
 };
 
 struct SdkError {
@@ -114,6 +132,7 @@ bool ParseFrameFormat(const std::string& name, FrameFormat* out);
 bool ParseCompression(const std::string& name, Compression* out);
 bool ParseTimestampDomain(const std::string& name, TimestampDomain* out);
 FrameFormat ExpectedFormatForStream(StreamId stream_id);
+bool IsAllowedFormatForStream(StreamId stream_id, FrameFormat format);
 bool IsImageStream(StreamId stream_id);
 bool IsImageFormat(FrameFormat format);
 

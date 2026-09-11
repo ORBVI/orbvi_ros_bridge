@@ -86,5 +86,9 @@ std::string SerializeMetadata(const MetadataMap& metadata);
 Result<MetadataMap> ParseMetadata(const std::string& serialized);
 Result<OwnedFrame> ParseFrameBytes(const std::uint8_t* data, std::size_t size);
 Result<OwnedFrame> ParseFrameBytes(const std::vector<std::uint8_t>& bytes);
+// Produces the transport-independent canonical ORBVI1 representation of a
+// validated logical frame. UVC frames use this same representation even though
+// their original video and metadata arrived on separate device nodes.
+Result<std::vector<std::uint8_t>> SerializeFrameBytes(const OwnedFrame& frame);
 
 }  // namespace orbvi_sdk

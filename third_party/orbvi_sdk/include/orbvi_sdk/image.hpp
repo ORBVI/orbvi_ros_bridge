@@ -211,6 +211,9 @@ Result<OwnedRectifiedAtlasImageSet> DecodeRectifiedAtlasBundleToBgr888(
 Result<RectifiedCompressedImageSet> ExtractRectifiedCompressedImages(
     const FrameView& frame,
     std::uint8_t requested_mask = kAllRectifiedImagesMask);
+// Borrow the two existing 320x1024 JPEG atlases without cropping or decoding.
+// The returned bytes remain valid only while the input FrameView is alive.
+Result<CompressedImageSet> ExtractRectifiedCompressedAtlases(const FrameView& frame);
 Result<CompressedImageSet> ExtractCompressedImages(
     const FrameView& frame,
     const CompressedImageRequest& request = {});

@@ -83,4 +83,24 @@ Result<FisheyeCalibrationResult> CalibrateFisheye(const FisheyeCalibrationOption
 Result<void> SaveFisheyeCalibration(const FisheyeCalibrationResult& result,
                                    const std::string& output_directory);
 
+struct LegacyFisheyeMigrationOptions {
+  std::string input_file;
+  // Required: selects the shared product identity contract, never inferred.
+  FisheyeCameraPlatform platform = FisheyeCameraPlatform::Unknown;
+  // Explicit original calibration image sizes, in front/right/rear/left order.
+  std::array<std::array<int, 2>, 4> image_sizes{};
+};
+
+// Offline migration of legacy TSCM OpenCV YAML containing ONLY cam0..cam3
+// (1x9 doubles) and Twc0..Twc3 (3x4 doubles). Calling this API confirms role
+// order front/right/rear/left, millimeters, and Twc = T_front_optical_camera.
+// No solve, rescaling, camera reordering, device connection or installation.
+// Requires a NEW output directory with an existing parent. Preserves numeric
+// values and writes camera_config.yaml, identical tscm_physical.yaml, and a
+// migration_report.json completion marker with source/output hashes. Does not
+// invent solver provenance or quality metrics. Extended/new YAML is rejected
+// to avoid silently discarding or relabeling existing metadata.
+Result<void> MigrateLegacyFisheyeCalibration(const LegacyFisheyeMigrationOptions& options,
+                                            const std::string& output_directory);
+
 }  // namespace orbvi_sdk

@@ -77,6 +77,14 @@ inline void PtsMatcher::OnFrameSync(const FrameSyncV2& fs) {
   for (std::size_t i = 0; i < kFrameSyncUvcCount; ++i) {
     e.pts[i] = fs.uvc[i].pts_ticks;
   }
+  for (auto& existing : window_) {
+    if (existing.capture_seq == e.capture_seq) {
+      for (std::size_t index = 0; index < kFrameSyncUvcCount; ++index)
+        if (e.uvc_valid_mask & (1U << index)) existing.pts[index] = e.pts[index];
+      existing.uvc_valid_mask |= e.uvc_valid_mask;
+      return;
+    }
+  }
   window_.push_back(std::move(e));
   while (window_.size() > kPtsMatcherWindowSize) {
     window_.pop_front();

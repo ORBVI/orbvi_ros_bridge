@@ -21,6 +21,8 @@ constexpr const char* kBulkOtaUploadTransport = "vendor_bulk_otaf01";
 
 // Data Bulk interface name; consumed by the BulkReader data binding.
 constexpr const char* kBulkInterfaceName = "ORBVI Vendor Bulk";
+// Exact interface identity required by BSP orbvi-vendor-bulk-full-v1.
+constexpr const char* kBulkImagesInterfaceName = "ORBVI Vendor Bulk Image";
 
 // OTA Bulk interface name. Host discovers OTA endpoints at runtime from the
 // exact OTA iInterface, vendor class, bulk type, and endpoint direction;

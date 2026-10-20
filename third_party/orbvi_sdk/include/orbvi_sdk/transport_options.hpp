@@ -7,13 +7,15 @@ namespace orbvi_sdk {
 
 // Transport selection model for the ORBVI device SDK.
 //
-// Three explicit product profiles are supported:
+// Four explicit transport profiles are supported:
 //
 //   profile        | image | non-image data | control | OTA
 //   ---------------+-------+----------------+---------+-----
 //   NetworkNetwork | Net   | Net            | Net     | Net
 //   UvcOnly         | UVC   | -              | -       | -
 //   UvcVendorBulk  | UVC   | Bulk           | Bulk    | Bulk
+//   VendorBulkFull | Bulk  | Bulk           | Bulk    | Bulk
+// VendorBulkFull also leaves Raw UVC preview available to generic viewers.
 //
 // Mixed combinations (for example UVC images over a Network control plane,
 // or Network images with a Bulk control plane) are intentionally unsupported
@@ -25,6 +27,7 @@ enum class TransportProfile : std::uint8_t {
   NetworkNetwork = 0,
   UvcVendorBulk = 1,
   UvcOnly = 2,
+  VendorBulkFull = 3,
 };
 
 struct DeviceOptions {
@@ -39,6 +42,8 @@ inline const char* ToString(TransportProfile profile) {
       return "uvc-vendor-bulk";
     case TransportProfile::UvcOnly:
       return "uvc-only";
+    case TransportProfile::VendorBulkFull:
+      return "vendor-bulk-full";
   }
   return "unknown";
 }
@@ -55,6 +60,10 @@ inline bool ParseTransportProfile(const std::string& name,
     if (out != nullptr) {
       *out = TransportProfile::UvcVendorBulk;
     }
+    return true;
+  }
+  if (name == "vendor-bulk-full") {
+    if (out != nullptr) *out = TransportProfile::VendorBulkFull;
     return true;
   }
   if (name == "uvc-only") {
@@ -79,7 +88,8 @@ inline DeviceOptionsValidation ValidateDeviceOptions(
   DeviceOptionsValidation result;
   if (options.transport_profile != TransportProfile::NetworkNetwork &&
       options.transport_profile != TransportProfile::UvcVendorBulk &&
-      options.transport_profile != TransportProfile::UvcOnly) {
+      options.transport_profile != TransportProfile::UvcOnly &&
+      options.transport_profile != TransportProfile::VendorBulkFull) {
     result.ok = false;
     result.reason = "unknown transport profile";
     return result;

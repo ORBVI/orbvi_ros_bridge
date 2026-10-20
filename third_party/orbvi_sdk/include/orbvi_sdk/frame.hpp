@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "orbvi_sdk/compatibility.hpp"
 #include "orbvi_sdk/status.hpp"
 
 namespace orbvi_sdk {
@@ -35,6 +36,10 @@ struct SubscriptionStats {
   TransportMode transport_mode = TransportMode::SampleEndpoint;
   double observed_rate_hz = 0.0;
   std::size_t payload_size_bytes = 0;
+  // Host steady-clock duration from complete logical frame validation to
+  // callback admission, including receive queues, calibration and decoding.
+  // Excludes device processing, transport, and the user callback itself;
+  // never subtracts the device's source timestamp from a Host clock.
   double delivery_latency_ms = 0.0;
   double decode_latency_ms = 0.0;
   double max_decode_latency_ms = 0.0;
@@ -69,6 +74,7 @@ struct FrameView {
   std::size_t payload_size = 0;
   std::string calibration_version;
   std::string calibration_hash;
+  PeerContract peer_contract = PeerContract::Current;
 };
 
 struct OwnedFrame {
@@ -76,6 +82,8 @@ struct OwnedFrame {
   std::string frame_id;
   MetadataMap metadata;
   std::vector<std::uint8_t> payload;
+  // Local interpretation context; never encoded in the ORBVI1 envelope.
+  PeerContract peer_contract = PeerContract::Current;
 
   FrameView view() const;
 };
@@ -84,7 +92,11 @@ std::uint32_t Crc32(const std::uint8_t* data, std::size_t size);
 std::uint32_t FrameCrc32(const std::uint8_t* data, std::size_t size);
 std::string SerializeMetadata(const MetadataMap& metadata);
 Result<MetadataMap> ParseMetadata(const std::string& serialized);
+// The original pointer and vector overloads always enforce the current contract.
 Result<OwnedFrame> ParseFrameBytes(const std::uint8_t* data, std::size_t size);
+// Compatibility is selected per frame by the caller, never inferred from bytes.
+Result<OwnedFrame> ParseFrameBytes(const std::uint8_t* data, std::size_t size,
+                                 PeerContract peer_contract);
 Result<OwnedFrame> ParseFrameBytes(const std::vector<std::uint8_t>& bytes);
 // Produces the transport-independent canonical ORBVI1 representation of a
 // validated logical frame. UVC frames use this same representation even though

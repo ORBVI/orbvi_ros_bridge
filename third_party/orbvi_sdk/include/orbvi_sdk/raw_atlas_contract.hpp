@@ -49,6 +49,7 @@ inline std::uint32_t RawAtlasCameraIdForTile(RawAtlasTileIndex tile) {
   return kRawAtlasCameraIds[static_cast<std::size_t>(tile)];
 }
 
+// 4V Lite only. 4P tile indices identify connectors, not physical directions.
 inline const char* RawAtlasDirectionForTile(RawAtlasTileIndex tile) {
   return kRawAtlasTileDirections[static_cast<std::size_t>(tile)];
 }

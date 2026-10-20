@@ -41,6 +41,9 @@ struct LidarImuExtrinsic {
   std::array<double, 3> translation_m{};
 };
 
+// A successfully read diagnostic snapshot, which may be incomplete. Only
+// status == "READY" denotes a complete four-camera LiDAR calibration. Missing
+// cameras are omitted from camera_extrinsics; imu_extrinsic is independent.
 struct LidarCalibration {
   std::string calibration_version;
   // The camera bundle hash is retained separately so a LiDAR update does not
@@ -57,6 +60,10 @@ struct LidarCalibration {
   std::optional<LidarImuExtrinsic> imu_extrinsic;
 };
 
+// Success includes the known missing-files state and preserves validated
+// available components. Check status before using the full camera bundle and
+// imu_extrinsic before using the manufacturer transform. Read, format and
+// validation failures remain errors; no missing transform is synthesized.
 Result<LidarCalibration> ParseLidarCalibrationJson(const std::string& calibration_json);
 Result<LidarCalibration> MakeLidarCalibration(const CalibrationStatus& calibration_status);
 

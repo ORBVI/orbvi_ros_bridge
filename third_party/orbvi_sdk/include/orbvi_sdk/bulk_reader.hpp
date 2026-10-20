@@ -22,6 +22,7 @@ namespace detail {
 class BulkUsbRuntime;
 class UsbBackend;
 class BulkReaderTestPeer;
+class SubscriptionTransportAccess;
 }
 
 // Host-side Vendor Bulk reader (Chapter 3/5: Bulk + Network coexistence).
@@ -44,7 +45,8 @@ inline constexpr std::uint32_t kBulkReaderMaxControlResponseAttempts = 1024;
 inline constexpr std::uint32_t kBulkReaderMaxReadErrors = 1024;
 // Total number of distinct stream slots retained by the shared-IN router.
 // The device contract admits up to eight concurrently active logical streams;
-// each slot contains at most one Latest frame, so this remains a fixed bound.
+// public/default slots contain one Latest frame. SDK recording admission uses
+// a separate private FIFO frame/byte/age budget without changing this layout.
 inline constexpr std::uint32_t kBulkReaderMaxQueuedDataFrames = 8;
 inline constexpr std::uint32_t kBulkReaderMaxPendingControlResponses = 32;
 // Synchronous libusb calls are sliced so Close() can observe cancellation and
@@ -71,7 +73,7 @@ struct BulkReaderConfig {
   // that caller's logical attempt budget. Must be nonzero and <= the bound.
   std::uint32_t control_response_attempts = 32;
   // Shared-IN demux queues are bounded. This is the number of distinct stream
-  // slots; each slot is always Latest(1), and ready slots are consumed fairly.
+  // slots; default slots use Latest(1), and ready slots are consumed fairly.
   // Control requests reserve bounded active slots before sending. Unsolicited,
   // timed-out and duplicate responses are rejected; a legal active response
   // is never evicted by another response.
@@ -150,7 +152,9 @@ class BulkReader {
 
  private:
   friend class detail::BulkReaderTestPeer;
+  friend class detail::SubscriptionTransportAccess;
 
+  BulkReaderStatus OpenInterface(const BulkReaderConfig& config, const std::string& interface_name);
   BulkReaderConfig config_;
   std::unique_ptr<detail::UsbBackend> injected_backend_;
   std::unique_ptr<detail::BulkUsbRuntime> runtime_;

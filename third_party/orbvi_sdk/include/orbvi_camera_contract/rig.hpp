@@ -58,7 +58,7 @@ struct Rig {
 
 // The only platform ID tables. Never substitute MIPI indices or pair IDs here.
 inline constexpr Rig kRk3588Rig{{{3, 2, 4, 5}}};
-inline constexpr Rig kX5Rig{{{0, 3, 2, 1}}};
+inline constexpr Rig kX5Rig{{{1, 0, 3, 2}}};
 inline constexpr std::optional<Rig> ForPlatform(Platform platform) {
   switch (platform) {
     case Platform::Rk3588: return kRk3588Rig;

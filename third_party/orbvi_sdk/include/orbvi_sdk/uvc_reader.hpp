@@ -22,6 +22,7 @@ namespace orbvi_sdk {
 namespace detail {
 class UvcBackend;
 class UvcReaderTestPeer;
+class SubscriptionTransportAccess;
 struct UvcReaderRunState;
 }  // namespace detail
 
@@ -87,6 +88,7 @@ enum class UvcReaderStatus {
   DescriptorMismatch,
   DeviceIdentityMismatch,
   CloseFailed,
+  RecordingIncomplete,
 };
 
 const char* ToString(UvcReaderStatus status);
@@ -126,6 +128,7 @@ class UvcReader {
 
  private:
   friend class detail::UvcReaderTestPeer;
+  friend class detail::SubscriptionTransportAccess;
 
   UvcReaderConfig config_;
   std::unique_ptr<detail::UvcBackend> injected_backend_;

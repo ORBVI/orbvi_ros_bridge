@@ -68,12 +68,22 @@ inline bool IsRectifiedDirectionValue(const std::string& direction) {
          direction == "left";
 }
 
-// pair_direction/source_camera_direction are additive ORBVI1 metadata. Frames
-// from older devices are accepted by deriving the same values from pair_id and
-// side. When present, the SDK Core metadata is authoritative.
+// Validate wire directions against the selected peer contract, then expose the
+// current identity. Missing additive directions are derived from pair_id/side;
+// explicit contradictory or empty directions are rejected in either contract.
 inline std::optional<RectifiedImageIdentity> ResolveRectifiedImageIdentity(
     const MetadataMap& metadata,
-    const std::string& prefix = {}) {
+    const std::string& prefix = {},
+    PeerContract peer_contract = PeerContract::Current) {
+  if (!IsValidPeerContract(peer_contract)) {
+    return std::nullopt;
+  }
+  const auto bundle_type = metadata.find("bundle_type");
+  if (peer_contract == PeerContract::Legacy0daaf911 &&
+      bundle_type != metadata.end() &&
+      bundle_type->second == "RECTIFIED_FISHEYE_ATLAS_BUNDLE_V2") {
+    return std::nullopt;
+  }
   const auto pair_it = metadata.find(prefix + "pair_id");
   const auto side_it = metadata.find(prefix + "side");
   if (pair_it == metadata.end() || side_it == metadata.end()) {
@@ -95,26 +105,31 @@ inline std::optional<RectifiedImageIdentity> ResolveRectifiedImageIdentity(
   identity.pair_id = pair_id;
   identity.side = side_it->second;
 
-  const std::string expected_pair_direction = RectifiedPairDirection(pair_id);
+  static constexpr std::array<const char*, 4> kLegacyPairDirections = {
+      "front", "right", "rear", "left"};
+  const std::string expected_pair_direction =
+      peer_contract == PeerContract::Legacy0daaf911
+          ? kLegacyPairDirections[pair_id]
+          : RectifiedPairDirection(pair_id);
   const auto pair_direction_it = metadata.find(prefix + "pair_direction");
   if (pair_direction_it != metadata.end() &&
       pair_direction_it->second != expected_pair_direction) {
     return std::nullopt;
   }
   const std::string expected_source_direction =
-      RectifiedSourceCameraDirection(pair_id, identity.side);
+      peer_contract == PeerContract::Legacy0daaf911
+          ? kLegacyPairDirections[
+                (pair_id + (identity.side == "right" ? 1u : 0u)) % 4u]
+          : RectifiedSourceCameraDirection(pair_id, identity.side);
   const auto source_direction_it =
       metadata.find(prefix + "source_camera_direction");
   if (source_direction_it != metadata.end() &&
       source_direction_it->second != expected_source_direction) {
     return std::nullopt;
   }
-  identity.pair_direction = pair_direction_it != metadata.end()
-          ? pair_direction_it->second
-          : expected_pair_direction;
-  identity.source_camera_direction = source_direction_it != metadata.end()
-          ? source_direction_it->second
-          : expected_source_direction;
+  identity.pair_direction = RectifiedPairDirection(pair_id);
+  identity.source_camera_direction =
+      RectifiedSourceCameraDirection(pair_id, identity.side);
   return identity;
 }
 
@@ -221,10 +236,15 @@ Result<void> DecodeMjpegImagesToBgr888(
     const FrameView& frame,
     std::vector<OwnedDecodedImage>* images);
 // RAW_ATLAS_MJPEG is decoded once and split into four 1280x1088 images in
-// fixed front/right/rear/left camera order (X5 camera IDs 0/3/2/1).
+// fixed front/right/rear/left camera order (4V Lite camera IDs 1/0/3/2).
 Result<std::vector<OwnedDecodedImage>> DecodeMjpegImagesToBgr888(const FrameView& frame);
 bool DecodePolicyRequiresImage(const DecodePolicy& policy);
 const char* ToString(DecodeMode mode);
 const char* ToString(OverflowPolicy policy);
+
+// Metadata-only interval of all logical camera views. No JPEG crop/decode.
+// This validates the image envelope, not the JPEG contents or synchronization.
+struct ImageTimeRange { std::uint64_t first_ns = 0, last_ns = 0; };
+Result<ImageTimeRange> CameraImageTimeRange(const FrameView& frame);
 
 }  // namespace orbvi_sdk

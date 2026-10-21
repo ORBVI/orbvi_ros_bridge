@@ -19,6 +19,7 @@ enum class StreamId : std::uint16_t {
   BevDisplay = 9,
   Bev = BevDisplay,
   FrameSync = 10,
+  RegisteredCloud = 11,
 };
 
 enum class FrameFormat : std::uint16_t {
@@ -38,6 +39,7 @@ enum class FrameFormat : std::uint16_t {
   BevMjpeg = BevDisplayJpeg,
   RawAtlasMjpeg = 11,
   FrameSyncV2 = 12,
+  RegisteredPointXyziRgb = 13,
   Reserved = 65535,
 };
 

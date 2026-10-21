@@ -34,6 +34,9 @@ struct RecordingProvenance {
   std::string calibration_json;
   std::string device_info_json;
   std::string device_status_json;
+  // sdk_peer_contract selects current-v1 (default) or legacy-0daaf911 for the
+  // entire session. Every written frame must have that PeerContract. Recorder
+  // sets this from Client::getCompatibility(); it is not ORBVI1 frame metadata.
   MetadataMap metadata;
 };
 
@@ -146,6 +149,8 @@ public:
   RecordingReader(RecordingReader &&) noexcept;
   RecordingReader &operator=(RecordingReader &&) noexcept;
 
+  // Restores sdk_peer_contract from session metadata. Older recordings without
+  // the key use Current; empty, unknown or duplicate declarations are rejected.
   static Result<RecordingReader> Open(const std::string &path);
 
   const RecordingSessionInfo &sessionInfo() const;

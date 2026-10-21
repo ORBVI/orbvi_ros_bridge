@@ -72,7 +72,7 @@ ROS1 Noetic:
 ```bash
 sudo apt update
 sudo apt install -y \
-  cmake libboost-dev libopencv-dev \
+  cmake libboost-dev libyaml-cpp-dev libopencv-dev \
   ros-noetic-roscpp \
   ros-noetic-std-msgs \
   ros-noetic-sensor-msgs \
@@ -86,7 +86,7 @@ ROS2 Foxy 或 Jazzy:
 export ROS_DISTRO=foxy  # 或 jazzy
 sudo apt update
 sudo apt install -y \
-  cmake libboost-dev libopencv-dev \
+  cmake libboost-dev libyaml-cpp-dev libopencv-dev \
   python3-colcon-common-extensions \
   ros-${ROS_DISTRO}-rclcpp \
   ros-${ROS_DISTRO}-std-msgs \
@@ -151,6 +151,8 @@ Bridge 先订阅板端 `bev_display_stream`，Host 只把板端 JPEG 解码为 `
 Host 回退：默认假设四个相机离地 1.0 m，覆盖车体周围 20 m × 20 m，以
 0.02 m/px 生成 1000x1000 BGR，最高 5 Hz。超时、流被阻塞或运行时故障都不会
 触发板外派生。
+以上为默认设备模式；使用完整安装外参和机器人地面平面的投影请见
+[机器人 TF 与 IPM](docs/ROBOT_INTEGRATION.md)。
 
 如需在四方向深度可视化图中绘制 5×5 网格，并显示每个网格交点的深度值，启用
 `depth_viz_show_grid_values`：
@@ -291,12 +293,18 @@ scripts/orbvi_ros_bridge_rate_check.sh \
 | `host` | `127.0.0.1` | ORBVI 设备 IP 或 hostname |
 | `streams` | 随 launch 变化 | 逗号分隔的 stream token；`pano`、`bev` 表示板端优先显示流 |
 | `publish_lidar_pcl` | `false` | 额外将 Livox `CustomMsg` 转换并发布到 `/orbvi/lidar/points` |
-| `publish_ipm` | `false` | 请求板端优先的 `/orbvi/ipm/image`，是 `bev` token 的兼容开关 |
-| `ipm_camera_height_m` | `1.0` | Host 回退使用的相机离地高度 |
-| `ipm_extent_m` | `10.0` | Host 回退使用的 BEV 覆盖范围 |
-| `ipm_resolution_m_per_pixel` | `0.02` | Host 回退使用的米/像素；输出边长为 `2*extent/resolution`，最大 4096 |
-| `ipm_max_publish_rate_hz` | `5.0` | Host 回退最大发布频率；0 表示不节流 |
-| `ipm_frame_id` | `base_link` | BEV 图像 header 的坐标系 |
+| `publish_ipm` | `false` | 请求 `/orbvi/ipm/image`：设备模式优先板端显示流，机器人模式读取板端 GPU 地面投影，不回退 CPU |
+| `tf_mode` | `device` | `robot` 模式转换机器人位姿并应用安装外参 |
+| `mounting_config` | 空 | 推荐 `sdk` 读取板端唯一安装/地面快照；兼容 URDF frame 配置或本地 xyz/rpy YAML |
+| `publish_mounting_tf` | `false` | 选择安装广播者：URDF 或 bridge；`mounting_config:=sdk` 时数值来自板端 GPU 快照 |
+| `publish_odom_tf` | `false` | 机器人模式发布启动 odom → camera_init，归零 footprint 和航向；需 native Z-up 与地面平面 |
+| `odom_frame` | `odom` | 可选启动锚点的父 frame |
+| `depth_pointcloud_frame_id` | 空（ROS_BODY 默认 `orbvi_link`） | 同步设置 ROS_BODY 点云和静态 TF 的设备参考系名称；`base_link` 兼容旧版 |
+| `ipm_camera_height_m` | `1.0` | 设备模式 Host 回退高度；机器人模式使用完整外参和地面平面 |
+| `ipm_extent_m` | `10.0` | 仅设备模式 CPU 回退覆盖范围，米；GPU 由板端配置 |
+| `ipm_resolution_m_per_pixel` | `0.02` | 仅设备模式 CPU 回退米/像素，上限 4096；板端 GPU 默认 1000、上限 1024 |
+| `ipm_max_publish_rate_hz` | `5.0` | 仅设备模式 CPU 回退最大发布频率；0 表示不节流 |
+| `ipm_frame_id` | 自动 | 设备模式为 `base_link`；机器人模式为 mounting parent，不允许另设不一致的 frame |
 | `depth_viz_show_grid_values` | `false` | 在每路方向深度可视化图上绘制 5×5 网格及网格交点米制深度值 |
 | `publish_vio_path` | `true` | 将优化后的 `/orbvi/vio/odometry` 累计并发布到 `/orbvi/vio/path` |
 | `vio_path_max_poses` | `2000` | Path 中保留的最大 Pose 数；小于等于 0 时按 1 处理 |
@@ -310,7 +318,37 @@ Topic 名称固定在 `/orbvi` 下。
 发布 10 Hz。高频或低带宽场景可调小点数或频率上限，或设置
 `publish_vio_path:=false` 关闭。
 
+4VL 的板端 Omni-LIVO 使用同一位姿流，bridge 通过
+`localization_source=omni_livo` 和 `pose_kind=OPTIMIZED` 识别优化位姿，
+并发布到 `/orbvi/vio/odometry` 和 `/orbvi/vio/path`。
+
+ROS1/ROS2 bridge 均支持 Omni-LIVO 动态 TF 与标定静态 TF：
+默认设备模式下，`camera_init → aft_mapped` 连接雷达、雷达 IMU、四路原始相机及 SDK ROS_BODY 深度点云。
+静态 TF 在标定加载后立即发布，不等待位姿。`publish_vio_tf` 默认开启；
+`publish_sensor_tf` 默认继承它，也可单独开启。新增 `orbvi_export_extrinsics`
+导出带标定 hash 的外参 JSON。原始相机 frame 统一为 `orbvi/camera/<SDK camera ID>`，
+雷达 IMU frame 修正为 `mid360_imu`；topic 名称与传感器数值保持原契约。
+设备参考系和 ROS_BODY 深度点云现在默认使用 `orbvi_link`（X 前、Y 左、Z 上），
+四路原始相机为光学系（X 右、Y 下、Z 前）。如需兼容旧名称，设置
+`depth_pointcloud_frame_id:=base_link`，导出时同步使用 `--device-frame base_link`。
+此参数不改变 IPM/BEV 的 header，也不提供机器人安装或地面外参。
+机器人模式单独配置安装外参，发布 `camera_init → base_link → orbvi_link → 传感器`，
+并读取板端 GPU 生成的机器人坐标系 IPM，核对安装 TF、地面平面和标定 hash，支持正装、倒装和旋转安装。
+URDF 模式通过 TF 读取安装外参，不再另读 YAML 安装数值；发现重复发布或变化时
+暂停机器人输出。可选 `publish_odom_tf:=true` 将起始 footprint 和航向对齐到 odom。
+配置、迁移和启动示例见 [机器人 TF 与 IPM](docs/ROBOT_INTEGRATION.md)。
+坐标定义、缺标定行为、兼容说明和验收命令见 [TF 与外参](docs/TF.md)。
+
+ROS2 传感器 topic 默认使用 Reliable QoS，兼容 RViz 的 Reliable 和 Best Effort
+订阅。需要 Best Effort 发布时，给 bridge launch 传入
+`sensor_data_best_effort:=true`；此时消费端也必须使用 Best Effort。
+
 ## 查看数据
+
+ROS2 自带 RViz 配置默认启用 `Color Depth Points` 和 TF 显示，固定坐标系为
+`camera_init`，并关闭 `LiDAR Points`。4VL 完整标定 TF 可用时可同时查看
+彩色深度点云和轨迹；勾选 `LiDAR Points` 可查看雷达。没有定位流时，传入
+`fixed_frame:=orbvi_link` 查看深度点云，或 `fixed_frame:=livox_frame` 查看原始雷达。
 
 ROS1 图像：
 

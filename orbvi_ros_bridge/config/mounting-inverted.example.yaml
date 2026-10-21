@@ -1,0 +1,11 @@
+# Example only. Replace xyz/rpy with the actual robot installation.
+# T_base_orbvi: p_base = R * p_orbvi + xyz, metres and radians.
+# Fixed-axis RPY rotation: Rz(yaw) * Ry(pitch) * Rx(roll).
+orbvi:
+  mounting:
+    parent_frame: base_link
+    child_frame: orbvi_link
+    xyz: [0.20, 0.0, 0.35]
+    rpy: [3.141592653589793, 0.0, 0.0]
+  # Robot-base plane nx*x + ny*y + nz*z + d = 0; here z=0.
+  ground_plane: [0.0, 0.0, 1.0, 0.0]

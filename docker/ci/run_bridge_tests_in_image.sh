@@ -25,6 +25,7 @@ cd /workspace/project/ci_ws
 catkin_make -DCMAKE_BUILD_TYPE=Release -DCATKIN_ENABLE_TESTING=ON
 catkin_make run_tests_orbvi_ros_bridge
 catkin_test_results
+python3 /workspace/project/orbvi_ros_bridge/test/test_launch_contracts.py
 '
     ;;
   ros2)
@@ -34,7 +35,11 @@ cd /workspace/project
 mkdir -p ci_ws/src ci_ws/build ci_ws/install ci_ws/log
 touch ci_ws/CATKIN_IGNORE ci_ws/COLCON_IGNORE
 ln -s /workspace/project /workspace/project/ci_ws/src/orbvi_ros_bridge
-source /opt/ros/foxy/setup.bash
+if [ -f /opt/ros/humble/setup.bash ]; then
+  source /opt/ros/humble/setup.bash
+else
+  source /opt/ros/foxy/setup.bash
+fi
 cd /workspace/project/ci_ws
 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 colcon test --packages-select orbvi_ros_bridge

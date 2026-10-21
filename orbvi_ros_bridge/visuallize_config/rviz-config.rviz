@@ -227,11 +227,20 @@ Visualization Manager:
       Topic: /orbvi/vio/path
       Unreliable: false
       Value: true
+    - Class: rviz/TF
+      Enabled: true
+      Name: Sensor TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Frames:
+        All Enabled: true
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
     Default Light: true
-    Fixed Frame: base_link
+    Fixed Frame: camera_init
     Frame Rate: 30
   Name: root
   Tools:

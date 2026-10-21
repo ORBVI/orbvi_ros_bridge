@@ -78,6 +78,7 @@ RUN --mount=type=cache,id=orbvi-ros-bridge-ci-apt-cache,target=/var/cache/apt,sh
     file \
     gnupg2 \
     libboost-dev \
+    libyaml-cpp-dev \
     lsb-release \
     libgtest-dev \
     libopencv-dev \
@@ -135,7 +136,8 @@ RUN --mount=type=cache,id=orbvi-ros-bridge-ci-apt-cache,target=/var/cache/apt,sh
       ros-noetic-message-generation \
       ros-noetic-nav-msgs \
       ros-noetic-ros-base \
-      ros-noetic-sensor-msgs; \
+      ros-noetic-sensor-msgs \
+      ros-noetic-tf2-ros; \
   else \
     apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
       python3-colcon-common-extensions \
@@ -143,7 +145,9 @@ RUN --mount=type=cache,id=orbvi-ros-bridge-ci-apt-cache,target=/var/cache/apt,sh
       ros-foxy-nav-msgs \
       ros-foxy-ros-base \
       ros-foxy-rosidl-default-generators \
-      ros-foxy-sensor-msgs; \
+      ros-foxy-sensor-msgs \
+      ros-foxy-tf2 \
+      ros-foxy-tf2-ros; \
   fi; \
   mkdir -p /opt/huanshi/orbvi-ros-bridge; \
   dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' \

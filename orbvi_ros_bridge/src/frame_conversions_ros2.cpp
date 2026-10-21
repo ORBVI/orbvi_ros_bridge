@@ -1,3 +1,4 @@
+#include "transform_adapters.hpp"
 #include "frame_conversions_ros2.hpp"
 
 #include <algorithm>
@@ -615,6 +616,8 @@ bool MakeSingleCompressedImage(
         SanitizeTopicToken(MetadataValue(metadata, "camera_id"), "");
     if (!camera_id.empty()) {
       out->topic_suffix = "raw/camera_" + camera_id + "/image/compressed";
+      const auto optical_frame = RawCameraFrameId(camera_id);
+      if (!optical_frame.empty()) out->message.header.frame_id = optical_frame;
     }
   } else if (frame.stream_id == orbvi_sdk::StreamId::RectifiedFisheye) {
     const auto identity =
@@ -1077,6 +1080,8 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
           MetadataValue(metadata, CameraMetadataKey(i, "camera_id")),
           std::to_string(i));
       output.topic_suffix = "raw/camera_" + camera_id + "/image/compressed";
+      const auto optical_frame = RawCameraFrameId(camera_id);
+      if (!optical_frame.empty()) output.message.header.frame_id = optical_frame;
       outputs.push_back(std::move(output));
     }
     return outputs;
@@ -1159,6 +1164,8 @@ std::vector<ImageOutput> MakeDecodedImageMessages(
     output.message.data.assign(decoded.data, decoded.data + decoded.data_size);
     if (stream == orbvi_sdk::StreamId::RawFisheye) {
       output.topic_suffix = "raw/camera_" + token + "/image";
+      const auto optical_frame = RawCameraFrameId(token);
+      if (!optical_frame.empty()) output.message.header.frame_id = optical_frame;
     } else {
       const std::string prefix =
           delivery.decoded_images.size() > 1u
@@ -1665,6 +1672,9 @@ bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Imu* ou
   }
   std::size_t offset = 0;
   out->header = MakeHeader(frame);
+  if (frame.stream_id == orbvi_sdk::StreamId::LidarImu) {
+    out->header.frame_id = "mid360_imu";
+  }
   return ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.x) &&
          ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.y) &&
          ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.z) &&
@@ -1689,6 +1699,13 @@ std::string VioTopicSuffix(const orbvi_sdk::FrameView& frame) {
   }
   if (source == "propagated") {
     return "vio/imu_prediction";
+  }
+  // 4VL's native Omni-LIVO adapter uses the shared VioPose wire format,
+  // with localization_source/pose_kind instead of the VINS vio_source tag.
+  if (source.empty() &&
+      LowerCopy(Trim(MetadataValue(metadata, "localization_source"))) == "omni_livo" &&
+      LowerCopy(Trim(MetadataValue(metadata, "pose_kind"))) == "optimized") {
+    return "vio/odometry";
   }
   return "";
 }
@@ -1799,6 +1816,11 @@ bool MakeVioOdometry(const orbvi_sdk::FrameView& frame, nav_msgs::msg::Odometry*
          ReadPod(frame.payload_data, frame.payload_size, &offset, &out->twist.twist.angular.z) &&
          ReadPodArray(frame.payload_data, frame.payload_size, &offset, &out->pose.covariance) &&
          ReadPodArray(frame.payload_data, frame.payload_size, &offset, &out->twist.covariance);
+}
+
+bool MakeOdometryTransform(const nav_msgs::msg::Odometry& odometry,
+                           geometry_msgs::msg::TransformStamped* out) {
+  return OdometryTransform(odometry, out);
 }
 
 bool AppendVioOdometryToPath(

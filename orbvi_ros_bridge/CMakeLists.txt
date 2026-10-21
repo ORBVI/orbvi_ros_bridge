@@ -163,6 +163,7 @@ function(orbvi_configure_host_sdk)
 endfunction()
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+find_package(yaml-cpp REQUIRED)
 orbvi_configure_host_sdk()
 
 set(_orbvi_runtime_rpath "$ORIGIN:$ORIGIN/..")
@@ -171,9 +172,23 @@ if(EXISTS "${_orbvi_sdk_library_dir}")
   set(_orbvi_runtime_rpath "${_orbvi_runtime_rpath}:${_orbvi_sdk_library_dir}")
 endif()
 
+add_library(orbvi_transform_geometry src/transform_geometry.cpp src/robot_tf.cpp)
+target_include_directories(orbvi_transform_geometry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(orbvi_transform_geometry PUBLIC ${ORBVI_ROS_BRIDGE_HOST_SDK_TARGET} yaml-cpp)
+add_executable(orbvi_export_extrinsics src/export_extrinsics.cpp)
+target_link_libraries(orbvi_export_extrinsics orbvi_transform_geometry)
+set_target_properties(orbvi_transform_geometry orbvi_export_extrinsics PROPERTIES
+  BUILD_RPATH "${_orbvi_runtime_rpath}" INSTALL_RPATH "${_orbvi_runtime_rpath}")
+install(TARGETS orbvi_transform_geometry ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
+set_target_properties(orbvi_export_extrinsics PROPERTIES
+  INSTALL_RPATH "$ORIGIN/../lib;${_orbvi_runtime_rpath}")
+install(TARGETS orbvi_export_extrinsics RUNTIME DESTINATION bin)
+
 if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
   find_package(catkin REQUIRED COMPONENTS
     roscpp
+    tf2_ros
+    tf2_msgs
     geometry_msgs
     sensor_msgs
     nav_msgs
@@ -181,7 +196,7 @@ if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
   )
 
   catkin_package(
-    CATKIN_DEPENDS roscpp geometry_msgs sensor_msgs nav_msgs livox_ros_driver2
+    CATKIN_DEPENDS roscpp tf2_ros tf2_msgs geometry_msgs sensor_msgs nav_msgs livox_ros_driver2
   )
 
   add_library(orbvi_ros_bridge
@@ -195,6 +210,7 @@ if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
     ${OpenCV_INCLUDE_DIRS}
   )
   target_link_libraries(orbvi_ros_bridge
+    orbvi_transform_geometry
     ${ORBVI_ROS_BRIDGE_HOST_SDK_TARGET}
     ${catkin_LIBRARIES}
     ${OpenCV_LIBS}
@@ -233,9 +249,13 @@ if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
   )
   install(DIRECTORY config/
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
-    FILES_MATCHING PATTERN "*.yaml"
+    FILES_MATCHING PATTERN "*.yaml" PATTERN "*.xacro"
   )
 
+  install(DIRECTORY visuallize_config/
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/visuallize_config
+    FILES_MATCHING PATTERN "*.rviz"
+  )
   if(CATKIN_ENABLE_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(
@@ -243,6 +263,10 @@ if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_contracts.py
     )
 
+    catkin_add_gtest(test_transform_geometry test/test_transform_geometry.cpp test/test_robot_tf.cpp test/test_board_ipm.cpp)
+    if(TARGET test_transform_geometry)
+      target_link_libraries(test_transform_geometry orbvi_transform_geometry gtest_main)
+    endif()
     catkin_add_gtest(test_orbvi_ros_bridge_host_sdk_link test/test_host_sdk_link.cpp)
     if(TARGET test_orbvi_ros_bridge_host_sdk_link)
       add_dependencies(test_orbvi_ros_bridge_host_sdk_link ${catkin_EXPORTED_TARGETS})
@@ -264,6 +288,9 @@ if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
 else()
   find_package(ament_cmake REQUIRED)
   find_package(rclcpp REQUIRED)
+  find_package(tf2 REQUIRED)
+  find_package(tf2_ros REQUIRED)
+  find_package(tf2_msgs REQUIRED)
   find_package(std_msgs REQUIRED)
   find_package(geometry_msgs REQUIRED)
   find_package(sensor_msgs REQUIRED)
@@ -281,11 +308,15 @@ else()
     ${OpenCV_INCLUDE_DIRS}
   )
   target_link_libraries(orbvi_ros_bridge
+    orbvi_transform_geometry
     ${ORBVI_ROS_BRIDGE_HOST_SDK_TARGET}
     ${OpenCV_LIBS}
   )
   ament_target_dependencies(orbvi_ros_bridge
     rclcpp
+    tf2
+    tf2_ros
+    tf2_msgs
     std_msgs
     geometry_msgs
     sensor_msgs
@@ -324,12 +355,17 @@ else()
     FILES_MATCHING
       PATTERN "*.xml"
       PATTERN "*.yaml"
+      PATTERN "*.xacro"
   )
   install(DIRECTORY visuallize_config/
     DESTINATION share/${PROJECT_NAME}/visuallize_config
     FILES_MATCHING PATTERN "*.rviz"
   )
 
+  ament_add_gtest(test_transform_geometry test/test_transform_geometry.cpp test/test_robot_tf.cpp test/test_board_ipm.cpp)
+  if(TARGET test_transform_geometry)
+    target_link_libraries(test_transform_geometry orbvi_transform_geometry)
+  endif()
   ament_add_gtest(test_orbvi_ros_bridge_host_sdk_link_ros2 test/test_host_sdk_link_ros2.cpp)
   if(TARGET test_orbvi_ros_bridge_host_sdk_link_ros2)
     target_link_libraries(test_orbvi_ros_bridge_host_sdk_link_ros2
@@ -340,6 +376,9 @@ else()
     )
     ament_target_dependencies(test_orbvi_ros_bridge_host_sdk_link_ros2
       rclcpp
+      tf2
+      tf2_ros
+    tf2_msgs
       std_msgs
       geometry_msgs
       sensor_msgs
@@ -362,6 +401,13 @@ if(EXISTS "${_orbvi_sdk_library_dir}" AND _orbvi_sdk_library_dir MATCHES "/third
     FILES_MATCHING PATTERN "liborbvi_sdk.so*"
   )
 endif()
+
+install(FILES "${ORBVI_ROS_BRIDGE_REPO_ROOT}/docs/TF.md"
+  "${ORBVI_ROS_BRIDGE_REPO_ROOT}/docs/ROBOT_INTEGRATION.md"
+  DESTINATION share/${PROJECT_NAME}/docs)
+install(DIRECTORY "${ORBVI_ROS_BRIDGE_REPO_ROOT}/docs/validation/"
+  DESTINATION share/${PROJECT_NAME}/docs/validation
+  FILES_MATCHING PATTERN "*.md")
 
 if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 2)
   ament_package()

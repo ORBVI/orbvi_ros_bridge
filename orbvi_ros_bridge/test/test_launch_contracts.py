@@ -27,9 +27,20 @@ ROS2_USER_LAUNCHES = {
 USER_ARGUMENT_DEFAULTS = {
     "host": "127.0.0.1",
     "publish_lidar_pcl": "false",
+    "ipm_extent_m": "10.0",
+    "ipm_resolution_m_per_pixel": "0.02",
+    "ipm_max_publish_rate_hz": "5.0",
+    "ipm_frame_id": "",
     "publish_ipm": "false",
     "depth_viz_show_grid_values": "false",
     "publish_vio_path": "true",
+    "publish_vio_tf": "true",
+    "depth_pointcloud_frame_id": "",
+    "tf_mode": "device",
+    "mounting_config": "",
+    "publish_mounting_tf": "false",
+    "publish_odom_tf": "false",
+    "odom_frame": "odom",
     "vio_path_max_poses": "2000",
     "vio_path_publish_rate_hz": "10.0",
 }
@@ -139,11 +150,14 @@ class LaunchContractTest(unittest.TestCase):
                 path = PACKAGE_ROOT / "launch" / launch_name
                 expected_arguments = dict(USER_ARGUMENT_DEFAULTS)
                 expected_arguments["streams"] = expected_streams
+                expected_arguments["publish_sensor_tf"] = "$(arg publish_vio_tf)"
                 self.assertEqual(
                     ros1_arg_defaults(path),
                     expected_arguments,
                 )
                 self.assertEqual(ros1_param_value(path, "streams"), "$(arg streams)")
+                for name in ("publish_vio_tf", "publish_sensor_tf", "depth_pointcloud_frame_id", "tf_mode", "mounting_config", "publish_mounting_tf", "ipm_extent_m", "ipm_resolution_m_per_pixel", "ipm_max_publish_rate_hz", "ipm_frame_id"):
+                    self.assertEqual(ros1_param_value(path, name), "$(arg " + name + ")")
                 self.assertEqual(
                     ros1_param_value(path, "depth_viz_show_grid_values"),
                     "$(arg depth_viz_show_grid_values)",
@@ -172,11 +186,19 @@ class LaunchContractTest(unittest.TestCase):
             with self.subTest(launch_name=launch_name):
                 path = PACKAGE_ROOT / "launch" / "ros2" / launch_name
                 expected_arguments = dict(USER_ARGUMENT_DEFAULTS)
+                expected_arguments["sensor_data_best_effort"] = "false"
+                expected_arguments["publish_vio_tf"] = "true"
                 expected_arguments["streams"] = expected_streams
                 self.assertEqual(
                     ros2_argument_defaults(path),
                     expected_arguments,
                 )
+                source = path.read_text(encoding="utf-8")
+                self.assertIn('parameters["publish_sensor_tf"] = LaunchConfiguration("publish_sensor_tf")', source)
+                for argument in ("tf_mode", "mounting_config", "publish_mounting_tf", "ipm_extent_m", "ipm_resolution_m_per_pixel", "ipm_max_publish_rate_hz", "ipm_frame_id"):
+                    self.assertIn('parameters["' + argument + '"]', source)
+                    self.assertIn('LaunchConfiguration("' + argument + '")', source)
+                self.assertIn('default_value=LaunchConfiguration("publish_vio_tf")', source)
                 parameters = ros2_dict_assignment(path, "DEFAULT_BRIDGE_PARAMETERS")
                 self.assertEqual(parameters["streams"], expected_streams)
                 source = path.read_text(encoding="utf-8")

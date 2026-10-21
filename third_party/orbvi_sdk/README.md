@@ -43,3 +43,14 @@ readelf -d libs/linux-x86_64/liborbvi_sdk.so.0.1.0 | grep NEEDED
 
 `readelf` should list OpenSSL, pthread, libstdc++, libc and the dynamic loader,
 but not `libturbojpeg`.
+
+## Additive board GPU geometry headers
+
+`include/orbvi_sdk/board_bev.hpp` and
+`include/orbvi_camera_contract/ground_projection.hpp` are imported unchanged from
+SDK commit `29714061` (`feat/robot-gpu-ipm-20261015`). They parse existing frame
+metadata entirely in headers; existing SDK ABI structures and library symbols
+are unchanged. The prebuilt libraries and `SOURCE_FINGERPRINT` retain their
+original bundle baseline. A full SDK refresh must preserve these public headers.
+Robot IPM additionally requires the matching board Camera Runtime/SDK Server
+(v7 local compressed DMA-BUF protocol and v4 runtime platform factory).

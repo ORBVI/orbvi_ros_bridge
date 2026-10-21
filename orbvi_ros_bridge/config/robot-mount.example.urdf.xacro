@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!-- Minimal example. Feed the SAME publish_mounting_tf argument to bridge and
+     xacro. The bridge owns SDK sensor links; do not duplicate those in URDF. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="orbvi_mount_example">
+  <xacro:arg name="publish_mounting_tf" default="false"/>
+  <xacro:arg name="mount_xyz" default="0.20 0 0.35"/>
+  <xacro:arg name="mount_rpy" default="0 0 0"/>
+  <link name="base_link"/>
+  <xacro:unless value="$(arg publish_mounting_tf)">
+    <link name="orbvi_link"/>
+    <joint name="orbvi_mount" type="fixed">
+      <parent link="base_link"/>
+      <child link="orbvi_link"/>
+      <origin xyz="$(arg mount_xyz)" rpy="$(arg mount_rpy)"/>
+    </joint>
+  </xacro:unless>
+</robot>

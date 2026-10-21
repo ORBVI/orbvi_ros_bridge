@@ -1,5 +1,6 @@
 <launch>
+    <arg name="fixed_frame" default="camera_init"/>
     <node pkg="rviz" type="rviz" name="rviz"
-        args="-d $(find orbvi_ros_bridge)/visuallize_config/rviz-config.rviz"
+        args="-d $(find orbvi_ros_bridge)/visuallize_config/rviz-config.rviz -f $(arg fixed_frame)"
         required="true" />
 </launch>

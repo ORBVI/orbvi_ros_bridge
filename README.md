@@ -76,7 +76,7 @@ ROS1 Noetic:
 ```bash
 sudo apt update
 sudo apt install -y \
-  cmake libboost-dev libopencv-dev \
+  cmake libboost-dev libyaml-cpp-dev libopencv-dev \
   ros-noetic-roscpp \
   ros-noetic-std-msgs \
   ros-noetic-sensor-msgs \
@@ -90,7 +90,7 @@ ROS2 Foxy or Jazzy:
 export ROS_DISTRO=foxy  # or jazzy
 sudo apt update
 sudo apt install -y \
-  cmake libboost-dev libopencv-dev \
+  cmake libboost-dev libyaml-cpp-dev libopencv-dev \
   python3-colcon-common-extensions \
   ros-${ROS_DISTRO}-rclcpp \
   ros-${ROS_DISTRO}-std-msgs \
@@ -157,6 +157,8 @@ decodes its JPEG into a `1000x1000` `bgr8` ROS image. The board target rate is
 fallback assumes four horizontal cameras at 1.0 m above the ground and generates
 a 20 m x 20 m, 0.02 m/pixel, 1000x1000 BGR image at up to 5 Hz. Timeouts, blocked
 streams and runtime failures do not activate Host derivation.
+This describes default device mode. For robot-mounted ground projection using
+full installation extrinsics, see [robot TF and IPM](docs/ROBOT_INTEGRATION.md).
 
 To draw a 5x5 grid and the depth at every grid intersection on all four
 directional depth visualizations, enable `depth_viz_show_grid_values`:
@@ -312,12 +314,18 @@ override.
 | `host` | `127.0.0.1` | ORBVI device IP or hostname |
 | `streams` | Launch-specific | Comma-separated stream tokens; `pano` and `bev` select board-preferred display outputs |
 | `publish_lidar_pcl` | `false` | Also convert Livox `CustomMsg` to `/orbvi/lidar/points` |
-| `publish_ipm` | `false` | Alias for requesting board-preferred `/orbvi/ipm/image` output |
-| `ipm_camera_height_m` | `1.0` | Host fallback camera height |
-| `ipm_extent_m` | `10.0` | Host fallback coverage from vehicle center in each cardinal direction |
-| `ipm_resolution_m_per_pixel` | `0.02` | Host fallback BEV meters per pixel; side is `2*extent/resolution`, capped at 4096 |
-| `ipm_max_publish_rate_hz` | `5.0` | Host fallback maximum rate; zero disables throttling |
-| `ipm_frame_id` | `base_link` | Frame id stored in the BEV image header |
+| `publish_ipm` | `false` | Request `/orbvi/ipm/image`: board-preferred in device mode, board GPU robot-ground projection without CPU fallback in robot mode |
+| `tf_mode` | `device` | Use `robot` to publish robot pose and apply installation extrinsics |
+| `mounting_config` | empty | Use `sdk` for the board mounting/ground snapshot; local URDF/frame or xyz/rpy YAML remains supported |
+| `publish_mounting_tf` | `false` | Choose installation publisher: URDF or bridge; `mounting_config:=sdk` reads values from the board GPU snapshot |
+| `publish_odom_tf` | `false` | Robot mode: anchor startup footprint and heading with static odom → camera_init; requires native Z-up and ground plane |
+| `odom_frame` | `odom` | Parent frame of the optional startup anchor |
+| `depth_pointcloud_frame_id` | empty (ROS_BODY: `orbvi_link`) | Device reference used by ROS_BODY cloud headers and static TF; `base_link` restores legacy naming |
+| `ipm_camera_height_m` | `1.0` | Device-mode Host fallback height; robot mode uses full extrinsics and ground plane |
+| `ipm_extent_m` | `10.0` | Device-mode CPU fallback coverage, metres; GPU geometry is configured on the board |
+| `ipm_resolution_m_per_pixel` | `0.02` | Device-mode CPU fallback metres per pixel, cap 4096; board GPU default 1000, cap 1024 |
+| `ipm_max_publish_rate_hz` | `5.0` | Device-mode CPU fallback maximum rate; zero disables throttling |
+| `ipm_frame_id` | auto | Device: `base_link`; robot: mounting parent, which cannot be overridden with a different frame |
 | `depth_viz_show_grid_values` | `false` | Draw a 5x5 grid and metric grid-point values on each directional depth visualization |
 | `publish_vio_path` | `true` | Accumulate optimized `/orbvi/vio/odometry` and publish `/orbvi/vio/path` |
 | `vio_path_max_poses` | `2000` | Maximum poses retained in the Path; values at or below zero are clamped to 1 |
@@ -332,7 +340,43 @@ frame changes or timestamps roll back. Memory and message size are bounded to
 10 Hz by default. Reduce the pose or rate limit for high-rate or low-bandwidth
 links, or set `publish_vio_path:=false` to disable the output.
 
+The 4VL native Omni-LIVO adapter uses the same pose stream. The ROS2 bridge
+recognizes `localization_source=omni_livo` with `pose_kind=OPTIMIZED` and
+publishes it on `/orbvi/vio/odometry` and `/orbvi/vio/path`.
+
+Both ROS1 and ROS2 bridges publish Omni-LIVO dynamic and calibrated static TF.
+In default device mode `camera_init → aft_mapped` connects LiDAR, LiDAR IMU, four raw cameras and SDK
+ROS_BODY depth clouds. Static TF is available immediately after calibration,
+without a pose subscription. `publish_vio_tf` defaults to true;
+`publish_sensor_tf` inherits it and can be enabled independently. The standalone
+`orbvi_export_extrinsics` tool exports JSON with calibration hashes. Raw image
+frames become `orbvi/camera/<SDK camera ID>`; LiDAR IMU becomes `mid360_imu`.
+
+The device reference and ROS_BODY depth clouds default to `orbvi_link`
+(forward, left, up); raw cameras use optical axes (right, down, forward).
+For legacy names, set `depth_pointcloud_frame_id:=base_link` and export with
+`--device-frame base_link`. IPM/BEV headers remain separately configured.
+Robot mode separates mounting from internal calibration and publishes
+`camera_init → base_link → orbvi_link → sensors`. It also computes robot-frame
+IPM from the board GPU with audited mounting/ground/calibration snapshots, including inverted and rotated
+installations. URDF mode reads the actual static TF without a second mounting pose
+in YAML; duplicate/changing installation TF pauses robot outputs. Optional
+`publish_odom_tf:=true` anchors startup footprint and heading in `odom`. See
+[robot TF and IPM setup](docs/ROBOT_INTEGRATION.md).
+Topic names and sensor values retain their existing contract. See
+[TF and extrinsic calibration](docs/TF.md) for frame definitions, migration,
+missing-calibration behavior and verification commands.
+
+ROS2 sensor topics default to Reliable QoS, supporting both Reliable and
+Best Effort subscribers. Set `sensor_data_best_effort:=true` on the bridge
+launch to use Best Effort publishers; subscribers must then use Best Effort.
+
 ## View Data
+
+The ROS2 RViz config enables `Color Depth Points` and TF in `camera_init` by
+default and disables `LiDAR Points`. With complete 4VL calibration TF, RGB depth,
+poses and enabled LiDAR displays share that frame. Without localization, pass
+`fixed_frame:=orbvi_link` for depth or `fixed_frame:=livox_frame` for raw LiDAR.
 
 ROS1 images:
 

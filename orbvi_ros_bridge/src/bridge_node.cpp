@@ -1,3 +1,10 @@
+#include "transform_adapters.hpp"
+#include "board_ipm.hpp"
+#include "robot_tf_session.hpp"
+#include <tf2_ros/buffer.h>
+#include <tf2_msgs/TFMessage.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 #include "bridge_node.hpp"
 
 #include <algorithm>
@@ -30,6 +37,7 @@ namespace orbvi_ros_bridge {
 namespace {
 
 struct IpmOptions : orbvi_sdk::BirdsEyeViewOptions {
+  IpmOptions() { frame_id.clear(); }
   bool enabled = false;
   bool host_fallback_active = false;
   double max_publish_rate_hz = 5.0;
@@ -62,6 +70,13 @@ struct BridgeConfig {
   IpmOptions ipm;
   bool publish_lidar_pcl = false;
   bool publish_vio_path = true;
+  bool publish_vio_tf = true;
+  bool publish_sensor_tf = true;
+  std::string tf_mode = "device";
+  std::string mounting_config;
+  bool publish_mounting_tf = false;
+  bool publish_odom_tf = false;
+  std::string odom_frame = "odom";
   std::size_t vio_path_max_poses = 2000;
   double vio_path_publish_rate_hz = 10.0;
   orbvi_sdk::DepthGenerationOptions depth_options;
@@ -269,15 +284,6 @@ class BridgeNode::Impl {
 
   bool Start() {
     config_ = LoadConfig();
-    {
-      std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
-      panorama_depth_frames_.clear();
-    }
-    {
-      std::lock_guard<std::mutex> lock(vio_path_mutex_);
-      vio_path_ = nav_msgs::Path();
-      last_vio_path_publish_time_ = std::chrono::steady_clock::time_point();
-    }
     orbvi_sdk::ClientOptions options;
     options.host = config_.host;
     options.control_port = config_.control_port;
@@ -293,8 +299,62 @@ class BridgeNode::Impl {
       client_.reset();
       return false;
     }
+    try {
+      if (config_.tf_mode == "robot" && config_.mounting_config == "sdk") {
+        orbvi_sdk::SubscribeOptions snapshot_options;
+        snapshot_options.first_frame_timeout_ms=config_.first_frame_timeout_ms;
+        snapshot_options.require_streaming_transport=config_.require_streaming_transport;
+        snapshot_options.allow_sample_endpoint_fallback=config_.allow_sample_endpoint_fallback;
+        tf_setup_=ConfigureBoardTf(ReadBoardMountingSnapshot(*client_,snapshot_options),config_.publish_mounting_tf,
+            config_.pointcloud_options.output_frame == orbvi_sdk::PointCloudFrame::RosBody
+                ? config_.pointcloud_options.frame_id : std::string{});
+      } else {
+        tf_setup_ = ConfigureTf(config_.tf_mode, config_.mounting_config,
+            config_.publish_mounting_tf,
+            config_.pointcloud_options.output_frame == orbvi_sdk::PointCloudFrame::RosBody
+                ? config_.pointcloud_options.frame_id : std::string{});
+      }
+      if (config_.pointcloud_options.output_frame == orbvi_sdk::PointCloudFrame::RosBody)
+        config_.pointcloud_options.frame_id = tf_setup_.device_frame;
+      if (config_.ipm.frame_id.empty())
+        config_.ipm.frame_id = tf_setup_.mounting ? tf_setup_.mounting->base_from_device.parent : "base_link";
+      if (config_.publish_odom_tf && (!tf_setup_.mounting || !config_.publish_vio_tf))
+        throw std::runtime_error("publish_odom_tf requires robot mode and publish_vio_tf");
+      if (config_.publish_odom_tf && (config_.odom_frame == tf_setup_.device_frame || !tf_setup_.mounting->ground_plane ||
+          !StartupOdomTransform({"camera_init",tf_setup_.mounting->base_from_device.parent,{}, {0,0,0,1}},
+              *tf_setup_.mounting->ground_plane,config_.odom_frame)))
+        throw std::runtime_error("Invalid odom frame or missing/invalid robot ground plane");
+      if (tf_setup_.mounting && config_.ipm.enabled) {
+        if (config_.ipm.frame_id != tf_setup_.mounting->base_from_device.parent)
+          throw std::runtime_error("Robot ipm_frame_id must match mounting.parent_frame");
+        if (!tf_setup_.mounting->ground_plane)
+          throw std::runtime_error("Robot IPM requires orbvi.ground_plane in mounting_config");
+        if (!std::isfinite(config_.ipm.max_publish_rate_hz) || config_.ipm.max_publish_rate_hz < 0)
+          throw std::runtime_error("Robot IPM rate must be finite and nonnegative");
+      }
+    } catch (const std::exception& error) {
+      ROS_ERROR_STREAM("Invalid TF configuration: " << error.what());
+      return false;
+    }
+    robot_tf_session_.reset();
+    sensor_calibration_.reset();
+    pose_transform_gate_ = PoseTransformGate{};
+    if (config_.publish_vio_tf)
+      vio_tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>();
+    if (config_.publish_sensor_tf || config_.publish_odom_tf)
+      sensor_tf_broadcaster_ = std::make_unique<tf2_ros::StaticTransformBroadcaster>();
+    {
+      std::lock_guard<std::mutex> lock(panorama_depth_mutex_);
+      panorama_depth_frames_.clear();
+    }
+    {
+      std::lock_guard<std::mutex> lock(vio_path_mutex_);
+      vio_path_ = nav_msgs::Path();
+      last_vio_path_publish_time_ = std::chrono::steady_clock::time_point();
+    }
 
     PrepareDepthPublisher();
+    PreparePoseTransforms();
     if (!PrepareIpmPublisher()) {
       Stop();
       return false;
@@ -325,6 +385,8 @@ class BridgeNode::Impl {
   }
 
   void Stop() {
+    robot_tf_timer_.stop();
+    robot_static_subscription_.shutdown();robot_dynamic_subscription_.shutdown();
     if (panorama_subscription_) {
       panorama_subscription_->stop();
       panorama_subscription_.reset();
@@ -500,6 +562,13 @@ class BridgeNode::Impl {
         "publish_vio_path",
         config.publish_vio_path,
         config.publish_vio_path);
+    private_node_.param<bool>("publish_vio_tf", config.publish_vio_tf, true);
+    private_node_.param<bool>("publish_sensor_tf", config.publish_sensor_tf, config.publish_vio_tf);
+    private_node_.param<std::string>("tf_mode", config.tf_mode, config.tf_mode);
+    private_node_.param<std::string>("mounting_config", config.mounting_config, config.mounting_config);
+    private_node_.param<bool>("publish_mounting_tf", config.publish_mounting_tf, config.publish_mounting_tf);
+    private_node_.param<bool>("publish_odom_tf", config.publish_odom_tf, config.publish_odom_tf);
+    private_node_.param<std::string>("odom_frame", config.odom_frame, config.odom_frame);
     int vio_path_max_poses = static_cast<int>(config.vio_path_max_poses);
     private_node_.param<int>(
         "vio_path_max_poses",
@@ -1027,6 +1096,83 @@ class BridgeNode::Impl {
         << config_.pointcloud_options.max_disparity_jump_px);
   }
 
+  const orbvi_sdk::CalibrationStatus* SensorCalibrationSnapshot() {
+    if (!sensor_calibration_) {
+      const auto status = client_->getCalibration("");
+      if (!status) {
+        ROS_WARN_STREAM("Cannot fetch sensor calibration snapshot: " << status.error().message);
+        return nullptr;
+      }
+      sensor_calibration_ = status.value();
+    }
+    return &*sensor_calibration_;
+  }
+
+  void PollRobotTf() {
+    if (!robot_tf_session_) return;
+    robot_tf_session_->Poll();
+    const auto state=robot_tf_session_->Snapshot();
+    if (!state) {
+      ROS_WARN_THROTTLE(5.0,"Robot TF/IPM paused: %s",robot_tf_session_->Error().c_str());
+      return;
+    }
+    if (!state->imu_from_base)
+      ROS_WARN_THROTTLE(5.0,"Robot pose TF paused: %s",robot_tf_session_->Error().c_str());
+  }
+  void HandleRobotTf(const tf2_msgs::TFMessage &message,const std::string &authority,bool is_static) {
+    if (!robot_tf_session_) return;
+    std::size_t count=0;
+    for (const auto &t:message.transforms) {
+      if (++count>4097) break;
+      const auto record=FromTransformMessage(t);
+      const bool tracked=robot_tf_session_->Observe(record,authority,is_static);
+      if (tracked && ValidTransform(record)) robot_tf_buffer_->setTransform(t,authority,true);
+    }
+  }
+  void OnRobotStaticTf(const ros::MessageEvent<tf2_msgs::TFMessage const> &event) {
+    HandleRobotTf(*event.getMessage(),event.getPublisherName(),true);
+  }
+  void OnRobotDynamicTf(const ros::MessageEvent<tf2_msgs::TFMessage const> &event) {
+    HandleRobotTf(*event.getMessage(),event.getPublisherName(),false);
+  }
+  void PrepareRobotTfSession(const SensorTransforms &snapshot) {
+    robot_tf_buffer_=std::make_unique<tf2_ros::Buffer>();
+    robot_tf_session_=std::make_unique<RobotTfSession>(tf_setup_,snapshot,config_.publish_sensor_tf,
+        config_.publish_odom_tf,config_.odom_frame,
+        [this](const auto &parent,const auto &child) {
+          return FromTransformMessage(robot_tf_buffer_->lookupTransform(parent,child,ros::Time(0)));
+        },
+        [this](const TransformRecord &record,bool broadcast) {
+          const auto message=ToTransformMessage<geometry_msgs::TransformStamped>(record);
+          robot_tf_buffer_->setTransform(message,"@local",true);
+          if (broadcast) sensor_tf_broadcaster_->sendTransform(message);
+        });
+    robot_static_subscription_=node_.subscribe("/tf_static",100,&Impl::OnRobotStaticTf,this);
+    robot_dynamic_subscription_=node_.subscribe("/tf",100,&Impl::OnRobotDynamicTf,this);
+    robot_tf_timer_=node_.createWallTimer(ros::WallDuration(0.1),[this](const ros::WallTimerEvent &){ PollRobotTf(); });
+  }
+
+  void PreparePoseTransforms() {
+    if (!config_.publish_sensor_tf && !tf_setup_.mounting) return;
+    const auto* status = SensorCalibrationSnapshot();
+    if (!status) return;
+    auto snapshot = LoadSensorTransforms(*status, tf_setup_.device_frame);
+    if (tf_setup_.mounting) {
+      const auto robot = BuildRobotTransforms(snapshot, *tf_setup_.mounting, false);
+      snapshot = robot.sensors;
+      PrepareRobotTfSession(snapshot);
+    }
+    for (const auto& diagnostic : snapshot.diagnostics)
+      ROS_WARN_STREAM("Sensor TF: " << diagnostic);
+    std::vector<geometry_msgs::TransformStamped> transforms;
+    for (const auto& record : snapshot.transforms)
+      transforms.push_back(ToTransformMessage<geometry_msgs::TransformStamped>(record));
+    if (config_.publish_sensor_tf && !transforms.empty()) sensor_tf_broadcaster_->sendTransform(transforms);
+    ROS_INFO_STREAM("Sensor TF startup snapshot: edges=" << transforms.size()
+                    << " mode=" << config_.tf_mode << " published=" << config_.publish_sensor_tf
+                    << " camera_hash=" << snapshot.camera_hash << " lidar_hash=" << snapshot.lidar_hash);
+  }
+
   bool PrepareIpmPublisher() {
     ipm_generator_ = orbvi_sdk::BirdsEyeViewGenerator();
     last_ipm_publish_time_ = std::chrono::steady_clock::time_point();
@@ -1053,6 +1199,11 @@ class BridgeNode::Impl {
       ROS_INFO_STREAM(
           "Subscribed board BEV stream bev_display_stream on "
           << JoinTopic(config_.topic_prefix, "ipm/image"));
+      return true;
+    }
+    if (tf_setup_.mounting) {
+      ROS_WARN_STREAM("Robot IPM unavailable: board GPU stream is required; CPU fallback is disabled: " << board_result.error().message);
+      config_.ipm.enabled=false;
       return true;
     }
     if (!ShouldFallbackToHostDisplay(board_result.error())) {
@@ -1459,6 +1610,15 @@ class BridgeNode::Impl {
     if (!config_.ipm.enabled || config_.ipm.host_fallback_active) {
       return;
     }
+    if (tf_setup_.mounting) {
+      const auto tf=robot_tf_session_ ? robot_tf_session_->Snapshot() : nullptr;
+      if (!tf) { ROS_WARN_THROTTLE(5.0,"Board robot IPM paused: waiting for audited static TF");return; }
+      if (!BoardIpmDecodedFrameMatches(delivery)) {
+        ROS_WARN_THROTTLE(5.0,"Board robot IPM skipped: decoded frame identity differs from GPU frame");return;
+      }
+      const auto error=CheckBoardRobotIpm(delivery.frame.view(),*tf,*tf_setup_.mounting->ground_plane);
+      if (!error.empty()) { ROS_WARN_THROTTLE(5.0,"Board robot IPM skipped: %s",error.c_str());return; }
+    }
     sensor_msgs::Image message;
     if (!MakeBoardDisplayImageMessage(delivery, config_.ipm.frame_id, &message)) {
       ROS_WARN_THROTTLE(5.0, "Board BEV frame skipped: decoded image is unavailable or invalid");
@@ -1768,7 +1928,7 @@ class BridgeNode::Impl {
     if (suffix.empty()) {
       ROS_WARN_THROTTLE(
           5.0,
-          "Dropping Host SDK VIO payload with missing or unsupported vio_source metadata");
+          "Dropping Host SDK pose payload with unsupported VINS/Omni-LIVO source metadata");
       return;
     }
     nav_msgs::Odometry message;
@@ -1777,6 +1937,28 @@ class BridgeNode::Impl {
       return;
     }
     Publisher<nav_msgs::Odometry>(JoinTopic(config_.topic_prefix, suffix)).publish(message);
+    if (config_.publish_vio_tf && suffix == "vio/odometry") {
+      geometry_msgs::TransformStamped transform;
+      std::lock_guard<std::mutex> lock(vio_tf_mutex_);
+      bool producer_changed = false;
+      const auto robot_snapshot = robot_tf_session_ ? robot_tf_session_->Snapshot() : nullptr;
+      bool valid = (!tf_setup_.mounting || (robot_snapshot && robot_snapshot->imu_from_base)) &&
+          OdometryTransform(message, &transform) && pose_transform_gate_.Accept(frame, &producer_changed);
+      if (valid && tf_setup_.mounting) {
+        TransformRecord corrected;
+        valid = robot_tf_session_->Pose(FromTransformMessage(transform),producer_changed,&corrected);
+        if (valid) {
+          transform = ToTransformMessage<geometry_msgs::TransformStamped>(corrected);
+          transform.header.stamp = message.header.stamp;
+        }
+      }
+      if (valid) {
+        if (producer_changed) ROS_WARN("Optimized TF producer restarted; accepting new pose sequence");
+        vio_tf_broadcaster_->sendTransform(transform);
+      } else {
+        ROS_WARN_THROTTLE(5.0, "Rejected optimized TF sample: invalid/duplicate/out-of-order pose, incompatible frames or unavailable robot calibration");
+      }
+    }
     if (!config_.publish_vio_path || suffix != "vio/odometry") {
       return;
     }
@@ -1814,6 +1996,16 @@ class BridgeNode::Impl {
   ros::NodeHandle private_node_;
   BridgeConfig config_;
   std::unique_ptr<orbvi_sdk::Client> client_;
+  TfSetup tf_setup_;
+  std::unique_ptr<RobotTfSession> robot_tf_session_;
+  std::unique_ptr<tf2_ros::Buffer> robot_tf_buffer_;
+  std::optional<orbvi_sdk::CalibrationStatus> sensor_calibration_;
+  ros::Subscriber robot_static_subscription_,robot_dynamic_subscription_;
+  ros::WallTimer robot_tf_timer_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> vio_tf_broadcaster_;
+  std::unique_ptr<tf2_ros::StaticTransformBroadcaster> sensor_tf_broadcaster_;
+  PoseTransformGate pose_transform_gate_;
+  std::mutex vio_tf_mutex_;
   std::optional<orbvi_sdk::DepthCalibration> depth_calibration_;
   std::optional<orbvi_sdk::DepthPanoramaLookup> depth_panorama_lookup_;
   orbvi_sdk::BirdsEyeViewGenerator ipm_generator_;

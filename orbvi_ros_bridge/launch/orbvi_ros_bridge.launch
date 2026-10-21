@@ -3,15 +3,39 @@
   <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
   <arg name="streams" default="raw,rectified,imu,disparity,depth,vio" doc="Comma-separated bridge streams"/>
   <arg name="publish_lidar_pcl" default="false" doc="Publish Livox CustomMsg as sensor_msgs/PointCloud2 on topic_prefix/lidar/points"/>
+  <arg name="ipm_extent_m" default="10.0"/>
+  <arg name="ipm_resolution_m_per_pixel" default="0.02"/>
+  <arg name="ipm_max_publish_rate_hz" default="5.0"/>
+  <arg name="ipm_frame_id" default=""/>
   <arg name="publish_ipm" default="false" doc="Request board-preferred BEV on topic_prefix/ipm/image"/>
   <arg name="depth_viz_show_grid_values" default="false" doc="Draw a 5x5 grid with metric depth values on each directional depth visualization"/>
+  <arg name="depth_pointcloud_frame_id" default="" doc="Empty uses orbvi_link for ROS_BODY; set base_link for legacy compatibility"/>
+  <arg name="tf_mode" default="device" doc="device or robot; robot requires mounting_config"/>
+  <arg name="mounting_config" default="" doc="Robot YAML: frames only for URDF mode; add xyz/rpy only when bridge owns installation"/>
+  <arg name="publish_mounting_tf" default="false" doc="Robot mode only: bridge owns mounting TF; leave false when URDF owns it"/>
+  <arg name="publish_odom_tf" default="false" doc="Robot mode: align odom origin to startup ground footprint and yaw to robot heading; native world must be Z-up"/>
+  <arg name="odom_frame" default="odom"/>
+  <arg name="publish_vio_tf" default="true"/>
+  <arg name="publish_sensor_tf" default="$(arg publish_vio_tf)"/>
   <arg name="publish_vio_path" default="true" doc="Publish bounded optimized VIO trajectory on topic_prefix/vio/path"/>
   <arg name="vio_path_max_poses" default="2000" doc="Maximum number of poses retained in the VIO Path message"/>
   <arg name="vio_path_publish_rate_hz" default="10.0" doc="Maximum VIO Path publication rate; zero publishes every optimized odometry update"/>
 
   <node pkg="orbvi_ros_bridge" type="orbvi_ros_bridge_node" name="orbvi_ros_bridge" output="screen">
+    <param name="depth_pointcloud_frame_id" value="$(arg depth_pointcloud_frame_id)" type="str"/>
+    <param name="tf_mode" value="$(arg tf_mode)" type="str"/>
+    <param name="mounting_config" value="$(arg mounting_config)" type="str"/>
+    <param name="publish_mounting_tf" value="$(arg publish_mounting_tf)"/>
+    <param name="publish_odom_tf" value="$(arg publish_odom_tf)"/>
+    <param name="odom_frame" value="$(arg odom_frame)" type="str"/>
+    <param name="publish_vio_tf" value="$(arg publish_vio_tf)"/>
+    <param name="publish_sensor_tf" value="$(arg publish_sensor_tf)"/>
     <param name="host" value="$(arg host)"/>
     <param name="publish_lidar_pcl" value="$(arg publish_lidar_pcl)"/>
+    <param name="ipm_extent_m" value="$(arg ipm_extent_m)"/>
+    <param name="ipm_resolution_m_per_pixel" value="$(arg ipm_resolution_m_per_pixel)"/>
+    <param name="ipm_max_publish_rate_hz" value="$(arg ipm_max_publish_rate_hz)"/>
+    <param name="ipm_frame_id" value="$(arg ipm_frame_id)" type="str"/>
     <param name="publish_ipm" value="$(arg publish_ipm)"/>
     <param name="depth_viz_show_grid_values" value="$(arg depth_viz_show_grid_values)"/>
     <param name="publish_vio_path" value="$(arg publish_vio_path)"/>

@@ -1,0 +1,7 @@
+# URDF owns installation. No xyz/rpy here: bridge reads the static TF tree.
+orbvi:
+  mounting:
+    parent_frame: base_link
+    child_frame: orbvi_link
+  # Robot-base plane; replace with the actual ground plane.
+  ground_plane: [0.0, 0.0, 1.0, 0.0]

@@ -2,6 +2,10 @@
 
 [English](README.md)
 
+首次使用随仓库提供的 4VL 板端 deb，请阅读
+[安装与使用说明](third_party/orbvi_sdk/deb/README.md)：包含校验、板端安装、
+版本检查、主机 bridge 启动和回滚方法。
+
 ORBVI ROS Bridge 通过 ORBVI Host SDK 将 ORBVI 设备数据发布到 ROS1 或 ROS2。
 它面向需要在 Linux 主机上获取相机、IMU、MID360 LiDAR、视差、Host 侧深度、
 板端全景/BEV 和 VIO topic 的应用开发者。
@@ -345,9 +349,13 @@ ROS2 传感器 topic 默认使用 Reliable QoS，兼容 RViz 的 Reliable 和 Be
 
 ## 查看数据
 
-ROS2 自带 RViz 配置默认启用 `Color Depth Points` 和 TF 显示，固定坐标系为
-`camera_init`，并关闭 `LiDAR Points`。4VL 完整标定 TF 可用时可同时查看
-彩色深度点云和轨迹；勾选 `LiDAR Points` 可查看雷达。没有定位流时，传入
+ROS1/ROS2 默认 RViz 布局将四路原始相机固定在顶部一排，顺序为
+前（3）、右（2）、后（4）、左（5），下方为点云视图。方向名称指设备本身方向，
+机器人安装后的方向以 TF 为准。重新打开默认 RViz launch 即可加载该布局。
+
+ROS2 自带 RViz 配置默认启用 `Color Depth Points`、`LiDAR Points` 和 TF 显示，
+固定坐标系为 `camera_init`。使用 MID360 bridge launch 并传入
+`publish_lidar_pcl:=true` 时可同时查看彩色深度点云、雷达和轨迹。没有定位流时，传入
 `fixed_frame:=orbvi_link` 查看深度点云，或 `fixed_frame:=livox_frame` 查看原始雷达。
 
 ROS1 图像：

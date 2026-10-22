@@ -2,6 +2,10 @@
 
 [中文版本](README.zh-CN.md)
 
+Installing the bundled 4VL board runtime? See the
+[deb installation and bridge quick start](third_party/orbvi_sdk/deb/README.md)
+for package verification, board installation, startup checks and rollback.
+
 ORBVI ROS Bridge publishes ORBVI device data into ROS1 or ROS2 through the
 ORBVI Host SDK. It is intended for application developers who need camera, IMU,
 MID360 LiDAR, disparity, Host-derived depth, board-generated panorama/BEV and
@@ -386,9 +390,14 @@ launch to use Best Effort publishers; subscribers must then use Best Effort.
 
 ## View Data
 
-The ROS2 RViz config enables `Color Depth Points` and TF in `camera_init` by
-default and disables `LiDAR Points`. With complete 4VL calibration TF, RGB depth,
-poses and enabled LiDAR displays share that frame. Without localization, pass
+The default ROS1/ROS2 RViz layout docks four raw cameras in one row at the top:
+front (3), right (2), rear (4), left (5), with the point-cloud view below.
+These directions refer to the device; use TF for robot mounting directions.
+Reopen the default RViz launch to load the layout.
+
+The ROS2 RViz config enables `Color Depth Points`, `LiDAR Points` and TF in
+`camera_init` by default. Start the MID360 bridge launch with
+`publish_lidar_pcl:=true` to view depth, LiDAR and poses together. Without localization, pass
 `fixed_frame:=orbvi_link` for depth or `fixed_frame:=livox_frame` for raw LiDAR.
 
 ROS1 images:

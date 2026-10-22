@@ -14,6 +14,11 @@ the bridge CMake pick the matching binary automatically.
 | `include/orbvi_sdk/` | Public C++ Host SDK headers |
 | `libs/linux-x86_64/` | Ubuntu x86_64 / amd64 Host SDK libraries |
 | `libs/linux-aarch64/` | Ubuntu aarch64 / arm64 Host SDK libraries |
+| `deb/` | 4VL ARM64 board runtime package; [installation and usage](deb/README.md) |
+
+The deb is installed on the compatible ORBVI board. The headers and libraries
+above are used to build the client bridge on the ROS host. Installing the board
+deb does not update the host bridge or its bundled SDK libraries.
 
 The bridge CMake defaults to the matching library directory for the current
 Linux architecture. Set `ORBVI_HOST_SDK_ROOT`,

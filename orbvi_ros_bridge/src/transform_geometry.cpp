@@ -465,15 +465,26 @@ std::string ExtrinsicsJson(const SensorTransforms &snapshot) {
 }
 
 bool PoseTransformGate::Accept(const orbvi_sdk::FrameView &frame,
-                               bool *changed) {
+                               bool *changed, std::string *rejection_reason) {
+  if (rejection_reason)
+    rejection_reason->clear();
+  const auto reject = [&](const std::string &reason) {
+    if (rejection_reason)
+      *rejection_reason = reason;
+    return false;
+  };
   if (changed)
     *changed = false;
-  if (frame.timestamp_ns == 0 ||
-      frame.timestamp_domain != orbvi_sdk::TimestampDomain::Realtime ||
-      Meta(frame, "timestamp_valid") == "false" ||
-      (!Meta(frame, "tracking_state").empty() &&
-       Meta(frame, "tracking_state") != "TRACKING"))
-    return false;
+  if (frame.timestamp_ns == 0)
+    return reject("zero_sample_timestamp");
+  if (frame.timestamp_domain != orbvi_sdk::TimestampDomain::Realtime)
+    return reject("non_realtime_sample_timestamp");
+  if (Meta(frame, "timestamp_valid") == "false")
+    return reject("producer_timestamp_invalid");
+  const auto tracking = Meta(frame, "tracking_state");
+  if (!tracking.empty() && tracking != "TRACKING")
+    return reject("tracking_state=" + tracking +
+                  "; tracking_reason=" + Meta(frame, "tracking_reason"));
   const auto boot = Meta(frame, "boot_id"),
              generation = Meta(frame, "generation");
   const std::string epoch =
@@ -484,12 +495,14 @@ bool PoseTransformGate::Accept(const orbvi_sdk::FrameView &frame,
   if (new_epoch) {
     if (std::find(retired_epochs_.begin(), retired_epochs_.end(), epoch) !=
         retired_epochs_.end())
-      return false;
-  } else if (frame.timestamp_ns <= timestamp_ ||
-             (has_sequence && timestamp_ != 0 &&
-              (sequence == sequence_ ||
-               (!epoch.empty() && sequence < sequence_))))
-    return false;
+      return reject("retired_producer_epoch");
+  } else {
+    if (frame.timestamp_ns <= timestamp_)
+      return reject("duplicate_or_out_of_order_sample_timestamp");
+    if (has_sequence && timestamp_ != 0 &&
+        (sequence == sequence_ || (!epoch.empty() && sequence < sequence_)))
+      return reject("duplicate_or_out_of_order_sequence");
+  }
   if (new_epoch) {
     if (!epoch_.empty()) {
       if (retired_epochs_.size() == 16)

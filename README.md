@@ -340,9 +340,22 @@ frame changes or timestamps roll back. Memory and message size are bounded to
 10 Hz by default. Reduce the pose or rate limit for high-rate or low-bandwidth
 links, or set `publish_vio_path:=false` to disable the output.
 
-The 4VL native Omni-LIVO adapter uses the same pose stream. The ROS2 bridge
-recognizes `localization_source=omni_livo` with `pose_kind=OPTIMIZED` and
-publishes it on `/orbvi/vio/odometry` and `/orbvi/vio/path`.
+The 4VL native Omni-LIVO adapter uses the same pose stream. Both ROS1 and ROS2
+recognize `localization_source=omni_livo`: `pose_kind=OPTIMIZED` is published on
+`/orbvi/vio/odometry` and `/orbvi/vio/path`, while `pose_kind=PROPAGATED` is
+published on `/orbvi/vio/imu_prediction`. Predictions never broadcast optimized
+TF. Optimized samples marked `tracking_state=DEGRADED` (including `recovering`)
+remain available as Odometry but do not advance TF until `TRACKING` resumes.
+A TF rejection message reports the actual tracking reason, timestamp,
+sequence, frame or installation-calibration failure. The first rejection warns
+immediately; subsequent summaries are limited to one report per 60 seconds,
+using a monotonic host clock. Summaries count accepted/rejected optimized poses.
+After at least five seconds of uninterrupted acceptance, the next eligible
+report announces recovery at INFO level. Brief recovery/rejection oscillations
+do not restart the log interval. Algorithm degradation is
+not an unsupported SDK pose format; inspect `tracking_reason` on the device.
+See the [pose metadata validation](docs/validation/2026-10-21-pose-metadata.md)
+for the tested versions, live results and remaining depth-quality limits.
 
 Both ROS1 and ROS2 bridges publish Omni-LIVO dynamic and calibrated static TF.
 In default device mode `camera_init → aft_mapped` connects LiDAR, LiDAR IMU, four raw cameras and SDK

@@ -1,3 +1,4 @@
+#include "pose_tf_diagnostics.hpp"
 #include "transform_adapters.hpp"
 #include "board_ipm.hpp"
 #include "robot_tf_session.hpp"
@@ -339,6 +340,7 @@ class BridgeNode::Impl {
     robot_tf_session_.reset();
     sensor_calibration_.reset();
     pose_transform_gate_ = PoseTransformGate{};
+    pose_tf_diagnostics_ = PoseTfDiagnostics{};
     if (config_.publish_vio_tf)
       vio_tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>();
     if (config_.publish_sensor_tf || config_.publish_odom_tf)
@@ -1942,11 +1944,20 @@ class BridgeNode::Impl {
       std::lock_guard<std::mutex> lock(vio_tf_mutex_);
       bool producer_changed = false;
       const auto robot_snapshot = robot_tf_session_ ? robot_tf_session_->Snapshot() : nullptr;
-      bool valid = (!tf_setup_.mounting || (robot_snapshot && robot_snapshot->imu_from_base)) &&
-          OdometryTransform(message, &transform) && pose_transform_gate_.Accept(frame, &producer_changed);
+      std::string rejection_reason;
+      bool valid = false;
+      if (tf_setup_.mounting && (!robot_snapshot || !robot_snapshot->imu_from_base)) {
+        rejection_reason = "robot_installation_or_sensor_calibration_unavailable";
+      } else if (!OdometryTransform(message, &transform)) {
+        rejection_reason = "invalid_odometry_pose_or_frames";
+      } else {
+        valid = pose_transform_gate_.Accept(frame, &producer_changed, &rejection_reason);
+      }
       if (valid && tf_setup_.mounting) {
         TransformRecord corrected;
         valid = robot_tf_session_->Pose(FromTransformMessage(transform),producer_changed,&corrected);
+        if (!valid)
+          rejection_reason = "robot_pose_conversion_failed_or_incompatible_frames";
         if (valid) {
           transform = ToTransformMessage<geometry_msgs::TransformStamped>(corrected);
           transform.header.stamp = message.header.stamp;
@@ -1955,8 +1966,10 @@ class BridgeNode::Impl {
       if (valid) {
         if (producer_changed) ROS_WARN("Optimized TF producer restarted; accepting new pose sequence");
         vio_tf_broadcaster_->sendTransform(transform);
-      } else {
-        ROS_WARN_THROTTLE(5.0, "Rejected optimized TF sample: invalid/duplicate/out-of-order pose, incompatible frames or unavailable robot calibration");
+      }
+      if (const auto report = pose_tf_diagnostics_.Observe(valid, rejection_reason)) {
+        if (report->warning) ROS_WARN("%s", report->message.c_str());
+        else ROS_INFO("%s", report->message.c_str());
       }
     }
     if (!config_.publish_vio_path || suffix != "vio/odometry") {
@@ -2005,6 +2018,7 @@ class BridgeNode::Impl {
   std::unique_ptr<tf2_ros::TransformBroadcaster> vio_tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> sensor_tf_broadcaster_;
   PoseTransformGate pose_transform_gate_;
+  PoseTfDiagnostics pose_tf_diagnostics_;
   std::mutex vio_tf_mutex_;
   std::optional<orbvi_sdk::DepthCalibration> depth_calibration_;
   std::optional<orbvi_sdk::DepthPanoramaLookup> depth_panorama_lookup_;

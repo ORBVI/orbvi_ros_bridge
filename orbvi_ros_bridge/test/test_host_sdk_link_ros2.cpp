@@ -573,7 +573,7 @@ TEST(OrbviRosBridgeVio, RoutesOptimizedAndPropagatedSourcesToSeparateTopics) {
   EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
 }
 
-TEST(OrbviRosBridgeVio, RoutesNativeOmniLivoOptimizedPoseWithoutVinsSourceTag) {
+TEST(OrbviRosBridgeVio, RoutesNativeOmniLivoOptimizedAndDegradedPredictionWithoutVinsSourceTag) {
   orbvi_sdk::OwnedFrame frame;
   frame.header.stream_id = orbvi_sdk::StreamId::VioPose;
   frame.header.format = orbvi_sdk::FrameFormat::VioPose;
@@ -583,6 +583,10 @@ TEST(OrbviRosBridgeVio, RoutesNativeOmniLivoOptimizedPoseWithoutVinsSourceTag) {
   EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/odometry");
 
   frame.metadata["pose_kind"] = "PROPAGATED";
+  frame.metadata["tracking_state"] = "DEGRADED";
+  frame.metadata["tracking_reason"] = "frame_cost_increased";
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/imu_prediction");
+  frame.metadata["pose_kind"] = "unknown";
   EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
   frame.metadata["pose_kind"] = "OPTIMIZED";
   frame.metadata["localization_source"] = "unknown";

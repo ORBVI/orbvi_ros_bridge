@@ -263,7 +263,7 @@ if(ORBVI_ROS_BRIDGE_ROS_VERSION EQUAL 1)
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_contracts.py
     )
 
-    catkin_add_gtest(test_transform_geometry test/test_transform_geometry.cpp test/test_robot_tf.cpp test/test_board_ipm.cpp)
+    catkin_add_gtest(test_transform_geometry test/test_transform_geometry.cpp test/test_robot_tf.cpp test/test_board_ipm.cpp test/test_pose_tf_diagnostics.cpp)
     if(TARGET test_transform_geometry)
       target_link_libraries(test_transform_geometry orbvi_transform_geometry gtest_main)
     endif()
@@ -362,7 +362,7 @@ else()
     FILES_MATCHING PATTERN "*.rviz"
   )
 
-  ament_add_gtest(test_transform_geometry test/test_transform_geometry.cpp test/test_robot_tf.cpp test/test_board_ipm.cpp)
+  ament_add_gtest(test_transform_geometry test/test_transform_geometry.cpp test/test_robot_tf.cpp test/test_board_ipm.cpp test/test_pose_tf_diagnostics.cpp)
   if(TARGET test_transform_geometry)
     target_link_libraries(test_transform_geometry orbvi_transform_geometry)
   endif()
@@ -393,6 +393,15 @@ else()
     NAME test_orbvi_ros_bridge_launch_contracts
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_contracts.py
   )
+  if(BUILD_TESTING)
+    add_test(
+      NAME test_orbvi_ros_bridge_ros2_launch_defaults
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ros2_launch_defaults.py
+    )
+    set_tests_properties(test_orbvi_ros_bridge_ros2_launch_defaults PROPERTIES
+      ENVIRONMENT "ROS_LOG_DIR=${CMAKE_CURRENT_BINARY_DIR}/launch-test-logs"
+    )
+  endif()
 endif()
 
 if(EXISTS "${_orbvi_sdk_library_dir}" AND _orbvi_sdk_library_dir MATCHES "/third_party/orbvi_sdk/libs/")

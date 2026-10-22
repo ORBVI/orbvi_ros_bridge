@@ -120,9 +120,10 @@ are normalized when broadcasting, as in the previous ROS2 implementation.
 
 When `boot_id`/`generation` metadata is available, a new producer epoch resets
 the gate; a bounded history rejects samples from the last 16 retired epochs.
-Current board versions can omit these epoch fields: then strictly forward time
-is required, and a sequence decrease with forward time is logged as a producer
-restart. An unknown-epoch backwards clock reset cannot safely be distinguished
+SDK Servers with pose epoch forwarding preserve both producer header fields
+for VINS and Omni-LIVO. Older board versions can omit them: then strictly
+forward time is required, and a sequence decrease with forward time is logged
+as a producer restart. An unknown-epoch backwards clock reset cannot safely be distinguished
 from a delayed sample; restart the bridge in that case. This feature does not
 change the SDK wire protocol or synthesize producer epochs.
 
@@ -145,6 +146,40 @@ its origin and yaw from the first valid robot pose and explicit robot ground
 plane, keeping native world Z-up. It does not infer gravity or ground height.
 An identified algorithm restart pauses this mode until bridge restart; the
 old static anchor must not be reused across changed algorithm worlds.
+
+## Tracking diagnostics and point-cloud comparison
+
+Omni-LIVO `OPTIMIZED` records go to `vio/odometry` and `vio/path`;
+`PROPAGATED` records go to `vio/imu_prediction`, including predictions marked
+`DEGRADED`. Both ROS versions use the same routing. Prediction receipt does not
+mean tracking has recovered. Optimized records in `DEGRADED/recovering` remain
+available as Odometry, but do not advance optimized TF. The rejection
+warning includes `tracking_state` and `tracking_reason`; other reasons identify
+invalid sample time, duplicate/out-of-order time or sequence, retired producer
+epoch, invalid Odometry frames/pose, or unavailable robot calibration.
+The first rejection is reported immediately. Further rejection/recovery reports
+are limited to one per 60 seconds, with accepted/rejected optimized-pose counts
+since the preceding report. Recovery is INFO and requires five seconds of
+uninterrupted acceptance plus an eligible report interval. This suppresses
+repeated `recovering` warnings and rapid state oscillations without changing
+the TF quality gate. The interval uses the host's monotonic clock.
+Do not replace the source timestamp with receive time or turn degraded
+predictions into optimized TF to hide these warnings.
+
+For alignment diagnostics, first compare `/orbvi/depth/points` with raw
+`/orbvi/lidar/points` using RViz Fixed Frame `orbvi_link`. Enable the `lidar`
+stream and `publish_lidar_pcl` to obtain the latter. This comparison uses only
+static calibration. The ordinary camera launch does not subscribe to LiDAR
+by default; a point cloud from another publisher is a different comparison.
+
+Omni-LIVO scan/map clouds are already expressed in `camera_init`. Comparing
+them with depth in that world additionally requires the optimized transform at
+the depth image's sample timestamp. TF pauses during degraded tracking; do not
+substitute the latest pose when a sample-time lookup is unavailable. Compare
+current scans separately from retained map points, and clear old RViz clouds
+after a localization restart. A discrepancy already present when projecting
+raw LiDAR into the matching rectified disparity cannot be corrected by changing
+the world TF. Investigate disparity/depth quality and calibration separately.
 
 ## Export
 

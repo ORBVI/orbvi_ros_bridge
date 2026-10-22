@@ -848,11 +848,28 @@ TEST(OrbviRosBridgeFrameIdentity, LidarImuUsesImuAxesWithoutChangingPayload) {
   EXPECT_EQ(message.header.frame_id,"livox_frame");
 }
 
-TEST(OrbviRosBridgeVio, RoutesNativeOmniLivoOptimizedPose) {
+TEST(OrbviRosBridgeVio, RoutesNativeOmniLivoOptimizedAndDegradedPredictionWithoutVinsSourceTag) {
   orbvi_sdk::OwnedFrame frame;
-  frame.metadata["localization_source"]="omni_livo";frame.metadata["pose_kind"]="OPTIMIZED";
-  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()),"vio/odometry");
-  frame.metadata["pose_kind"]="PROPAGATED";
+  frame.header.stream_id = orbvi_sdk::StreamId::VioPose;
+  frame.header.format = orbvi_sdk::FrameFormat::VioPose;
+  frame.frame_id = "camera_init";
+  frame.metadata["localization_source"] = "omni_livo";
+  frame.metadata["pose_kind"] = "OPTIMIZED";
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/odometry");
+
+  frame.metadata["pose_kind"] = "PROPAGATED";
+  frame.metadata["tracking_state"] = "DEGRADED";
+  frame.metadata["tracking_reason"] = "frame_cost_increased";
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/imu_prediction");
+  frame.metadata["pose_kind"] = "unknown";
+  EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
+  frame.metadata["pose_kind"] = "OPTIMIZED";
+  frame.metadata["localization_source"] = "unknown";
+  EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
+  frame.metadata["localization_source"] = "omni_livo";
+  frame.metadata["vio_source"] = "unknown";
+  EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
+  frame.metadata.clear();
   EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
 }
 

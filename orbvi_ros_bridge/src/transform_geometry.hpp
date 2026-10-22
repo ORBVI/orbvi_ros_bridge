@@ -48,7 +48,8 @@ std::string ExtrinsicsJson(const SensorTransforms &snapshot);
 class PoseTransformGate {
 public:
   bool Accept(const orbvi_sdk::FrameView &frame,
-              bool *producer_changed = nullptr);
+              bool *producer_changed = nullptr,
+              std::string *rejection_reason = nullptr);
 
 private:
   std::uint64_t timestamp_ = 0;

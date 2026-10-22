@@ -262,3 +262,43 @@ TEST(TransformGeometry, IncompleteSdkBundleKeepsValidLidarImuBranch) {
   calibration.raw_json.replace(position, 20, "[2,0,0,0,1,0,0,0,1]");
   EXPECT_TRUE(LoadSensorTransforms(calibration).transforms.empty());
 }
+
+TEST(PoseTransformGate, ReportsProducerDegradationWithoutConsumingRecoverySample) {
+  orbvi_sdk::MetadataMap metadata{{"sequence", "10"},
+      {"tracking_state", "TRACKING"}};
+  orbvi_sdk::FrameView frame;
+  frame.timestamp_ns = 100;
+  frame.timestamp_domain = orbvi_sdk::TimestampDomain::Realtime;
+  frame.metadata = &metadata;
+  PoseTransformGate gate;
+  std::string reason;
+  ASSERT_TRUE(gate.Accept(frame, nullptr, &reason));
+  EXPECT_TRUE(reason.empty());
+  metadata["tracking_state"] = "DEGRADED";
+  metadata["tracking_reason"] = "recovering";
+  metadata["sequence"] = "11";
+  frame.timestamp_ns = 101;
+  bool changed = true;
+  EXPECT_FALSE(gate.Accept(frame, &changed, &reason));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(reason, "tracking_state=DEGRADED; tracking_reason=recovering");
+  metadata["tracking_state"] = "TRACKING";
+  EXPECT_TRUE(gate.Accept(frame, nullptr, &reason));
+  EXPECT_TRUE(reason.empty());
+  EXPECT_FALSE(gate.Accept(frame, nullptr, &reason));
+  EXPECT_EQ(reason, "duplicate_or_out_of_order_sample_timestamp");
+  frame.timestamp_ns = 102;
+  EXPECT_FALSE(gate.Accept(frame, nullptr, &reason));
+  EXPECT_EQ(reason, "duplicate_or_out_of_order_sequence");
+  metadata["sequence"] = "12";
+  frame.timestamp_domain = orbvi_sdk::TimestampDomain::Unknown;
+  EXPECT_FALSE(gate.Accept(frame, nullptr, &reason));
+  EXPECT_EQ(reason, "non_realtime_sample_timestamp");
+  frame.timestamp_domain = orbvi_sdk::TimestampDomain::Realtime;
+  metadata["timestamp_valid"] = "false";
+  EXPECT_FALSE(gate.Accept(frame, nullptr, &reason));
+  EXPECT_EQ(reason, "producer_timestamp_invalid");
+  metadata["timestamp_valid"] = "true";
+  EXPECT_TRUE(gate.Accept(frame, nullptr, &reason));
+  EXPECT_TRUE(reason.empty());
+}

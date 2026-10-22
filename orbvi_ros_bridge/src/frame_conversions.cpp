@@ -1697,9 +1697,14 @@ std::string VioTopicSuffix(const orbvi_sdk::FrameView& frame) {
   // 4VL's native Omni-LIVO adapter uses the shared VioPose wire format,
   // with localization_source/pose_kind instead of the VINS vio_source tag.
   if (source.empty() &&
-      LowerCopy(Trim(MetadataValue(metadata, "localization_source"))) == "omni_livo" &&
-      LowerCopy(Trim(MetadataValue(metadata, "pose_kind"))) == "optimized") {
-    return "vio/odometry";
+      LowerCopy(Trim(MetadataValue(metadata, "localization_source"))) == "omni_livo") {
+    const auto kind = LowerCopy(Trim(MetadataValue(metadata, "pose_kind")));
+    if (kind == "optimized") {
+      return "vio/odometry";
+    }
+    if (kind == "propagated") {
+      return "vio/imu_prediction";
+    }
   }
   return "";
 }

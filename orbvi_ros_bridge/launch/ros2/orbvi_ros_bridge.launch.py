@@ -60,11 +60,11 @@ def bridge_launch_description(parameters, extra_parameter_files=None):
             default_value=ARGUMENT_DEFAULTS["depth_pointcloud_frame_id"],
             description="ROS_BODY device frame; empty uses orbvi_link; base_link restores legacy naming"),
         DeclareLaunchArgument(
-            "publish_sensor_tf",
-            default_value=LaunchConfiguration("publish_vio_tf")),
-        DeclareLaunchArgument(
             "publish_vio_tf",
             default_value=ARGUMENT_DEFAULTS["publish_vio_tf"]),
+        DeclareLaunchArgument(
+            "publish_sensor_tf",
+            default_value=LaunchConfiguration("publish_vio_tf")),
         DeclareLaunchArgument(
             "sensor_data_best_effort",
             default_value=ARGUMENT_DEFAULTS["sensor_data_best_effort"]),

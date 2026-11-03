@@ -45,7 +45,7 @@ struct IpmOptions : orbvi_sdk::BirdsEyeViewOptions {
 };
 
 struct BridgeConfig {
-  std::string host = "127.0.0.1";
+  std::string host = "192.168.3.100";
   std::uint16_t control_port = 18088;
   std::string topic_prefix = "/orbvi";
   std::vector<orbvi_sdk::StreamId> streams = {

@@ -14,7 +14,7 @@ VIO topics on Linux hosts.
 The repository includes:
 
 - ROS1 Noetic and ROS2 Foxy/Jazzy bridge nodes
-- Launch files for visual, MID360, and panorama workflows
+- 4V and 4VL bridge launch files, plus RViz and rqt viewer launch files
 - Minimal `livox_ros_driver2` CustomMsg definitions required by the bridge
 - MID360 and full-topic rate check tooling
 
@@ -136,342 +136,56 @@ source install/setup.bash
 
 ## Start The Bridge
 
-Choose one launch file. All user-facing launch files accept the common
-arguments documented below.
+Pick the launch file that matches the device model. Both enable every
+capability of that model by default. To trim the output, override `streams`.
+Common arguments are listed in [Launch Arguments](docs/LAUNCH_ARGUMENTS.md).
 
-Visual data, depth and VIO:
+The device address defaults to `192.168.3.100`. If your device uses another
+address, append `host:=<device-ip>` to the commands below.
 
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch host:=<device-ip>
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py host:=<device-ip>
-```
-
-Enable the board-preferred four-fisheye 360-degree BEV/IPM:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> publish_ipm:=true
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip> publish_ipm:=true
-```
-
-The Bridge first subscribes the board-generated `bev_display_stream` and only
-decodes its JPEG into a `1000x1000` `bgr8` ROS image. The board target rate is
-20 Hz. If the device explicitly reports that stream as unsupported, the Host
-fallback assumes four horizontal cameras at 1.0 m above the ground and generates
-a 20 m x 20 m, 0.02 m/pixel, 1000x1000 BGR image at up to 5 Hz. Timeouts, blocked
-streams and runtime failures do not activate Host derivation.
-This describes default device mode. For robot-mounted ground projection using
-full installation extrinsics, see [robot TF and IPM](docs/ROBOT_INTEGRATION.md).
-
-To draw a 5x5 grid and the depth at every grid intersection on all four
-directional depth visualizations, enable `depth_viz_show_grid_values`:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip> depth_viz_show_grid_values:=true
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=<device-ip> depth_viz_show_grid_values:=true
-```
-
-Valid values are rendered with two decimal places and the `m` suffix; invalid
-or out-of-range samples are rendered as `--`. The option changes only the four
-`/orbvi/<front|right|rear|left>/depth/viz` images. Raw depth and point-cloud
-outputs are unchanged. Overlay work is bounded to five horizontal lines, five
-vertical lines, and 25 labels per direction; drawing is in-place on the
-existing visualization buffer and is skipped entirely while the option is
-disabled.
-
-Visual data, depth, VIO and MID360:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
-```
-
-Visual data, depth, VIO, board-preferred panorama and board-preferred BEV:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_pano.launch host:=<device-ip>
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge_pano.launch.py host:=<device-ip>
-```
-
-Public topic names are fixed under `/orbvi`. The panorama launch first requests
-the board `pano_display_stream` and `bev_display_stream`. Only a board response
-of `UnsupportedStream` enables the matching Host-derived fallback. The bundled
-`config/pano_mode2.yaml` / `config/pano_mode2_ros2.yaml` geometry is used as the
-expected board panorama layout and as the complete Host fallback policy. The
-Host fallback projects a 2048x1024 angular canvas, crops 200 rows at the top and
-bottom, and publishes 2048x624 fixed-seam, four-level MultiBand output. The
-physical mapping is fixed as `front=3`, `right=2`,
-`rear=4`, `left=5`. The Host SDK normalizes RGB and rig depth panoramas to the
-same `[0, 2*pi)` azimuth contract, so the Bridge copies both images without
-phase adjustment. The public `/orbvi/depth/panorama` image uses a cached
-output-pixel inverse lookup built from the rectified intrinsics and rotations.
-It intentionally does not apply stereo-pair translations, matching the original
-clean visualization path. The separate optional RGB depth-assistance path keeps
-using `RigDepthPanorama` with full rotation and translation. Neither path uses
-point-cloud generation. Depth assistance is disabled by default because disparity
-from the stereo network trails the raw fisheye capture; using stale geometry on
-moving objects would increase ghosting. A throttled log reports the effective
-camera mapping and whether the rotation extrinsics are applied.
-
-The optional depth path retains the latest four `RigDepthPanorama` products and
-selects the closest one without waiting. Enable it only after RGB/disparity
-capture timestamps have been aligned and verified.
-
-Depth assistance requires the matching Host SDK ABI. Always refresh both
-`third_party/orbvi_sdk/include/orbvi_sdk` and the architecture-specific
-`liborbvi_sdk`, then clean and rebuild the Bridge. Replacing only the `.so` is
-not supported.
-
-ROS2 launch files set the bundled Fast DDS shared-memory profile for the bridge
-process. Start standalone ROS2 tools with the same profile when they need to
-consume large local topics:
-
-```bash
-SHM_PROFILE="$(ros2 pkg prefix orbvi_ros_bridge)/share/orbvi_ros_bridge/config/fastdds_shm.xml"
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTRTPS_DEFAULT_PROFILES_FILE="$SHM_PROFILE"
-export FASTDDS_DEFAULT_PROFILES_FILE="$SHM_PROFILE"
-export RMW_FASTRTPS_PUBLICATION_MODE=ASYNCHRONOUS
-ros2 daemon stop
-```
-
-## Visual And MID360 Data Check
-
-Start the MID360 entry.
-
-ROS1:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
-```
-
-ROS2:
-
-```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py host:=<device-ip>
-```
-
-Check topic presence and type from the bridge host:
-
-```bash
-rostopic list | grep '^/orbvi/lidar'
-rostopic type /orbvi/lidar/custom
-rostopic type /orbvi/lidar/imu
-```
-
-Measure ROS1 rates:
-
-```bash
-rostopic hz /orbvi/lidar/custom --window 30
-rostopic hz /orbvi/lidar/imu --window 100
-```
-
-Typical healthy values are around 10 Hz for `/orbvi/lidar/custom` and around
-200 Hz for `/orbvi/lidar/imu`. Exact values depend on MID360 configuration,
-network quality and host load.
-
-## Full Topic Rate Check
-
-The script checks topics from the ROS bridge host's local ROS master. It should
-run on the same machine that sources the ROS bridge workspace.
-
-MID360 topic subset:
-
-```bash
-scripts/orbvi_ros_bridge_rate_check.sh \
-  --bridge-setup ~/orbvi_ros1_ws/devel/setup.bash \
-  --topics /orbvi/lidar/custom,/orbvi/lidar/imu \
-  --sample-sec 20
-```
-
-All `/orbvi/*` topics:
-
-```bash
-scripts/orbvi_ros_bridge_rate_check.sh \
-  --bridge-setup ~/orbvi_ros1_ws/devel/setup.bash \
-  --sample-sec 20
-```
-
-Outputs are written to a timestamped directory:
-
-- `summary.log`
-- `rates.csv`
-- `topics/*.hz.log`
-
-## Launch Files
-
-The public interface is intentionally limited to three launch configurations.
-Each launch provides a workflow-specific `streams` default that callers may
-override.
-
-| Capability | ROS1 launch | ROS2 launch | First topics to check |
+| Device | ROS1 launch | ROS2 launch | Default `streams` |
 | --- | --- | --- | --- |
-| Visual, depth and VIO | `orbvi_ros_bridge.launch` | `orbvi_ros_bridge.launch.py` | `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`, `/orbvi/vio/odometry` |
-| Visual, depth, VIO and MID360 | `orbvi_ros_bridge_mid360.launch` | `orbvi_ros_bridge_mid360.launch.py` | `/orbvi/lidar/custom`, `/orbvi/lidar/imu` |
-| Visual, depth, VIO, panorama and BEV | `orbvi_ros_bridge_pano.launch` | `orbvi_ros_bridge_pano.launch.py` | `/orbvi/pano/image`, `/orbvi/ipm/image` |
+| 4V (four cameras, no LiDAR) | `orbvi_ros_bridge_4v.launch` | `orbvi_ros_bridge_4v.launch.py` | `raw,rectified,pano,bev,imu,disparity,depth,vio` |
+| 4VL (four cameras with LiDAR) | `orbvi_ros_bridge_4vl.launch` | `orbvi_ros_bridge_4vl.launch.py` | `raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio` |
 
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `host` | `127.0.0.1` | ORBVI device IP or hostname |
-| `streams` | Launch-specific | Comma-separated stream tokens; `pano` and `bev` select board-preferred display outputs |
-| `publish_lidar_pcl` | `false` | Also convert Livox `CustomMsg` to `/orbvi/lidar/points` |
-| `publish_ipm` | `false` | Request `/orbvi/ipm/image`: board-preferred in device mode, board GPU robot-ground projection without CPU fallback in robot mode |
-| `tf_mode` | `device` | Use `robot` to publish robot pose and apply installation extrinsics |
-| `mounting_config` | empty | Use `sdk` for the board mounting/ground snapshot; local URDF/frame or xyz/rpy YAML remains supported |
-| `publish_mounting_tf` | `false` | Choose installation publisher: URDF or bridge; `mounting_config:=sdk` reads values from the board GPU snapshot |
-| `publish_odom_tf` | `false` | Robot mode: anchor startup footprint and heading with static odom → camera_init; requires native Z-up and ground plane |
-| `odom_frame` | `odom` | Parent frame of the optional startup anchor |
-| `depth_pointcloud_frame_id` | empty (ROS_BODY: `orbvi_link`) | Device reference used by ROS_BODY cloud headers and static TF; `base_link` restores legacy naming |
-| `ipm_camera_height_m` | `1.0` | Device-mode Host fallback height; robot mode uses full extrinsics and ground plane |
-| `ipm_extent_m` | `10.0` | Device-mode CPU fallback coverage, metres; GPU geometry is configured on the board |
-| `ipm_resolution_m_per_pixel` | `0.02` | Device-mode CPU fallback metres per pixel, cap 4096; board GPU default 1000, cap 1024 |
-| `ipm_max_publish_rate_hz` | `5.0` | Device-mode CPU fallback maximum rate; zero disables throttling |
-| `ipm_frame_id` | auto | Device: `base_link`; robot: mounting parent, which cannot be overridden with a different frame |
-| `depth_viz_show_grid_values` | `false` | Draw a 5x5 grid and metric grid-point values on each directional depth visualization |
-| `publish_vio_path` | `true` | Accumulate optimized `/orbvi/vio/odometry` and publish `/orbvi/vio/path` |
-| `vio_path_max_poses` | `2000` | Maximum poses retained in the Path; values at or below zero are clamped to 1 |
-| `vio_path_publish_rate_hz` | `10.0` | Maximum Path publication rate; zero publishes every optimized odometry update |
-
-Topic names are fixed under `/orbvi`.
-
-`/orbvi/vio/path` does not consume `/orbvi/vio/imu_prediction`. Each pose keeps
-the optimized odometry frame, timestamp, and pose. The history resets when the
-frame changes or timestamps roll back. Memory and message size are bounded to
-`O(vio_path_max_poses)`, and the complete Path is published at no more than
-10 Hz by default. Reduce the pose or rate limit for high-rate or low-bandwidth
-links, or set `publish_vio_path:=false` to disable the output.
-
-The 4VL native Omni-LIVO adapter uses the same pose stream. Both ROS1 and ROS2
-recognize `localization_source=omni_livo`: `pose_kind=OPTIMIZED` is published on
-`/orbvi/vio/odometry` and `/orbvi/vio/path`, while `pose_kind=PROPAGATED` is
-published on `/orbvi/vio/imu_prediction`. Predictions never broadcast optimized
-TF. Optimized samples marked `tracking_state=DEGRADED` (including `recovering`)
-remain available as Odometry but do not advance TF until `TRACKING` resumes.
-A TF rejection message reports the actual tracking reason, timestamp,
-sequence, frame or installation-calibration failure. The first rejection warns
-immediately; subsequent summaries are limited to one report per 60 seconds,
-using a monotonic host clock. Summaries count accepted/rejected optimized poses.
-After at least five seconds of uninterrupted acceptance, the next eligible
-report announces recovery at INFO level. Brief recovery/rejection oscillations
-do not restart the log interval. Algorithm degradation is
-not an unsupported SDK pose format; inspect `tracking_reason` on the device.
-See the [pose metadata validation](docs/validation/2026-10-21-pose-metadata.md)
-for the tested versions, live results and remaining depth-quality limits.
-
-Both ROS1 and ROS2 bridges publish Omni-LIVO dynamic and calibrated static TF.
-In default device mode `camera_init → aft_mapped` connects LiDAR, LiDAR IMU, four raw cameras and SDK
-ROS_BODY depth clouds. Static TF is available immediately after calibration,
-without a pose subscription. `publish_vio_tf` defaults to true;
-`publish_sensor_tf` inherits it and can be enabled independently. The standalone
-`orbvi_export_extrinsics` tool exports JSON with calibration hashes. Raw image
-frames become `orbvi/camera/<SDK camera ID>`; LiDAR IMU becomes `mid360_imu`.
-
-The device reference and ROS_BODY depth clouds default to `orbvi_link`
-(forward, left, up); raw cameras use optical axes (right, down, forward).
-For legacy names, set `depth_pointcloud_frame_id:=base_link` and export with
-`--device-frame base_link`. IPM/BEV headers remain separately configured.
-Robot mode separates mounting from internal calibration and publishes
-`camera_init → base_link → orbvi_link → sensors`. It also computes robot-frame
-IPM from the board GPU with audited mounting/ground/calibration snapshots, including inverted and rotated
-installations. URDF mode reads the actual static TF without a second mounting pose
-in YAML; duplicate/changing installation TF pauses robot outputs. Optional
-`publish_odom_tf:=true` anchors startup footprint and heading in `odom`. See
-[robot TF and IPM setup](docs/ROBOT_INTEGRATION.md).
-Topic names and sensor values retain their existing contract. See
-[TF and extrinsic calibration](docs/TF.md) for frame definitions, migration,
-missing-calibration behavior and verification commands.
-
-ROS2 sensor topics default to Reliable QoS, supporting both Reliable and
-Best Effort subscribers. Set `sensor_data_best_effort:=true` on the bridge
-launch to use Best Effort publishers; subscribers must then use Best Effort.
-
-## View Data
-
-The default ROS1/ROS2 RViz layout docks four raw cameras in one row at the top:
-front (3), right (2), rear (4), left (5), with the point-cloud view below.
-These directions refer to the device; use TF for robot mounting directions.
-Reopen the default RViz launch to load the layout.
-
-The ROS2 RViz config enables `Color Depth Points`, `LiDAR Points` and TF in
-`camera_init` by default. Start the MID360 bridge launch with
-`publish_lidar_pcl:=true` to view depth, LiDAR and poses together. Without localization, pass
-`fixed_frame:=orbvi_link` for depth or `fixed_frame:=livox_frame` for raw LiDAR.
-
-ROS1 images:
+4V:
 
 ```bash
-rosrun rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4v.launch.py
 ```
 
-ROS2 images:
+4VL:
 
 ```bash
-ros2 run rqt_image_view rqt_image_view /orbvi/raw/camera_0/image
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py
 ```
 
-Point clouds, odometry, and the trajectory can be viewed in RViz:
+First topics to check: `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`,
+`/orbvi/vio/odometry`, `/orbvi/pano/image` and `/orbvi/ipm/image`. 4VL also
+publishes `/orbvi/lidar/custom` and `/orbvi/lidar/imu`.
 
-- `/orbvi/lidar/custom`
-- `/orbvi/depth/points`
-- `/orbvi/vio/odometry`
-- `/orbvi/vio/path`
-
-The bundled ROS1 and ROS2 RViz configurations include a `VIO Path` display.
-If the topic is active but the trajectory is not visible, set RViz `Fixed
-Frame` to the actual `/orbvi/vio/odometry.header.frame_id` value (normally
-`world` on the device).
-
-## FAQ
-
-### No topics are published
-
-Check that ROS and the bridge workspace are sourced in the same shell:
+Current firmware generates panorama and BEV on the board; the host only decodes
+and publishes them. Host-side derivation is a fallback for older firmware that
+reports a stream as unsupported. If you do not need them, remove `pano,bev` from
+`streams`, for example:
 
 ```bash
-source /opt/ros/noetic/setup.bash
-source ~/orbvi_ros1_ws/devel/setup.bash
-rosnode list
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch \
+  streams:=raw,rectified,imu,disparity,depth,vio
 ```
 
-Check the device control port from the bridge host:
+## Documentation
 
-```bash
-nc -vz <device-ip> 18088
-```
-
-### `livox_ros_driver2/CustomMsg` cannot be loaded
-
-Make sure the whole repository was cloned into the workspace `src` directory
-and rebuild the workspace. This repository includes a message-only
-`livox_ros_driver2` package for `CustomMsg`; it does not include Livox driver
-nodes or device configuration tools.
-
-### MID360 topic exists but rate is empty
-
-Run the MID360 launch first, then measure from the same bridge host:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch host:=<device-ip>
-rostopic hz /orbvi/lidar/custom --window 30
-```
-
-If the type exists but no samples arrive, keep the bridge running and inspect
-device-side MID360 state with device management tooling.
-
-### Depth topics are missing
-
-Depth output depends on disparity frames and valid calibration from the Host
-SDK:
-
-```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=<device-ip>
-```
-
-Then check `/orbvi/disparity`, `/orbvi/depth` and the bridge log.
+| Topic | Document |
+| --- | --- |
+| Launch arguments, depth grid overlay, VIO path, pose/TF summary, ROS2 QoS | [Launch Arguments](docs/LAUNCH_ARGUMENTS.md) |
+| BEV/IPM and panorama behavior, Host fallback, depth assistance | [Panorama and BEV](docs/PANORAMA_BEV.md) |
+| RViz, rqt (topic rates and images), ROS2 shared-memory transport | [View Data](docs/VIEWING.md) |
+| MID360 data check, full topic rate check, FAQ | [Checks and Troubleshooting](docs/TROUBLESHOOTING.md) |
+| Frame definitions and extrinsic calibration | [TF and extrinsic calibration](docs/TF.md) |
+| Robot mounting, robot TF and ground IPM | [Robot TF and IPM](docs/ROBOT_INTEGRATION.md) |
 
 ## License
 

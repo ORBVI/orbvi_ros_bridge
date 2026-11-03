@@ -20,7 +20,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "fixed_frame",
-            default_value="camera_init",
+            default_value="orbvi_link",
             description="Fixed frame: orbvi_link for depth, livox_frame for LiDAR; poses use their header frame (4VL: camera_init).",
         ),
         SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_fastrtps_cpp"),

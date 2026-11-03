@@ -125,8 +125,7 @@ ROS1 Noetic：
 ```bash
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge.launch \
-  host:=192.168.3.100 publish_vio_tf:=true publish_sensor_tf:=true
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch
 ```
 
 ROS2（将 `humble` 替换为主机已安装的 ROS2 发行版）：
@@ -134,11 +133,10 @@ ROS2（将 `humble` 替换为主机已安装的 ROS2 发行版）：
 ```bash
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge.launch.py \
-  host:=192.168.3.100 publish_vio_tf:=true publish_sensor_tf:=true
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py
 ```
 
-将 `host` 改成实际板端地址。相同设备的对应 TF 只保留一个发布实例；
+板端地址默认为 `192.168.3.100`，不同时追加 `host:=<板端 IP>`。相同设备的对应 TF 只保留一个发布实例；
 机器人安装配置、TF 与 IPM 参数见[机器人接入说明](../../../docs/ROBOT_INTEGRATION.md)。
 机器人 GPU IPM 还需要该文档规定的配套板端协议与功能，不能仅凭 deb 安装成功认定兼容。
 

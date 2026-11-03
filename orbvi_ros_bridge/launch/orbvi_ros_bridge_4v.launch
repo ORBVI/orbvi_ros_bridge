@@ -1,6 +1,6 @@
 <launch>
-  <!-- Board-preferred panorama and BEV, with Host derivation only if unsupported. -->
-  <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
+  <!-- 4V entry: all visual capabilities (cameras, panorama, BEV, IMU, disparity, depth, VIO). -->
+  <arg name="host" default="192.168.3.100" doc="ORBVI device IP or hostname"/>
   <arg name="streams" default="raw,rectified,pano,bev,imu,disparity,depth,vio" doc="Comma-separated bridge streams"/>
   <arg name="publish_lidar_pcl" default="false" doc="Publish Livox CustomMsg as sensor_msgs/PointCloud2 on topic_prefix/lidar/points"/>
   <arg name="ipm_extent_m" default="10.0"/>

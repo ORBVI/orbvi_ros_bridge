@@ -240,7 +240,7 @@ Visualization Manager:
   Global Options:
     Background Color: 48; 48; 48
     Default Light: true
-    Fixed Frame: camera_init
+    Fixed Frame: orbvi_link
     Frame Rate: 30
   Name: root
   Tools:

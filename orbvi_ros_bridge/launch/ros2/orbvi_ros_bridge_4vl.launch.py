@@ -1,3 +1,4 @@
+"""4VL entry: four cameras with LiDAR (cameras, panorama, BEV, IMU, MID360 point cloud and IMU, disparity, depth, VIO)."""
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -7,8 +8,8 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 ARGUMENT_DEFAULTS = {
-    "host": "127.0.0.1",
-    "streams": "raw,rectified,imu,disparity,depth,vio",
+    "host": "192.168.3.100",
+    "streams": "raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio",
     "publish_lidar_pcl": "false",
     "sensor_data_best_effort": "false",
     "ipm_extent_m": "10.0",
@@ -30,18 +31,46 @@ ARGUMENT_DEFAULTS = {
 }
 
 DEFAULT_BRIDGE_PARAMETERS = {
-    "streams": "raw,rectified,imu,disparity,depth,vio",
+    "streams": "raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio",
 }
 
 
-def bridge_launch_description(parameters, extra_parameter_files=None):
+def generate_launch_description():
+    pano_config = PathJoinSubstitution([
+        FindPackageShare("orbvi_ros_bridge"),
+        "config",
+        "pano_mode2_ros2.yaml",
+    ])
     fastdds_shm_profile = PathJoinSubstitution([
         FindPackageShare("orbvi_ros_bridge"),
         "config",
         "fastdds_shm.xml",
     ])
-    node_parameters = list(extra_parameter_files or [])
-    node_parameters.append(parameters)
+    parameters = dict(DEFAULT_BRIDGE_PARAMETERS)
+    parameters["host"] = LaunchConfiguration("host")
+    parameters["streams"] = LaunchConfiguration("streams")
+    parameters["publish_lidar_pcl"] = LaunchConfiguration("publish_lidar_pcl")
+    parameters["sensor_data_best_effort"] = LaunchConfiguration("sensor_data_best_effort")
+    parameters["ipm_extent_m"] = LaunchConfiguration("ipm_extent_m")
+    parameters["ipm_resolution_m_per_pixel"] = LaunchConfiguration("ipm_resolution_m_per_pixel")
+    parameters["ipm_max_publish_rate_hz"] = LaunchConfiguration("ipm_max_publish_rate_hz")
+    parameters["ipm_frame_id"] = ParameterValue(LaunchConfiguration("ipm_frame_id"), value_type=str)
+    parameters["publish_ipm"] = LaunchConfiguration("publish_ipm")
+    parameters["depth_viz_show_grid_values"] = LaunchConfiguration(
+        "depth_viz_show_grid_values")
+    parameters["publish_vio_path"] = LaunchConfiguration("publish_vio_path")
+    parameters["depth_pointcloud_frame_id"] = ParameterValue(
+        LaunchConfiguration("depth_pointcloud_frame_id"), value_type=str)
+    parameters["tf_mode"] = ParameterValue(LaunchConfiguration("tf_mode"), value_type=str)
+    parameters["mounting_config"] = ParameterValue(LaunchConfiguration("mounting_config"), value_type=str)
+    parameters["publish_mounting_tf"] = LaunchConfiguration("publish_mounting_tf")
+    parameters["publish_odom_tf"] = LaunchConfiguration("publish_odom_tf")
+    parameters["odom_frame"] = ParameterValue(LaunchConfiguration("odom_frame"), value_type=str)
+    parameters["publish_vio_tf"] = LaunchConfiguration("publish_vio_tf")
+    parameters["publish_sensor_tf"] = LaunchConfiguration("publish_sensor_tf")
+    parameters["vio_path_max_poses"] = LaunchConfiguration("vio_path_max_poses")
+    parameters["vio_path_publish_rate_hz"] = LaunchConfiguration(
+        "vio_path_publish_rate_hz")
     return LaunchDescription([
         DeclareLaunchArgument("ipm_extent_m", default_value=ARGUMENT_DEFAULTS["ipm_extent_m"]),
         DeclareLaunchArgument("ipm_resolution_m_per_pixel", default_value=ARGUMENT_DEFAULTS["ipm_resolution_m_per_pixel"]),
@@ -97,35 +126,6 @@ def bridge_launch_description(parameters, extra_parameter_files=None):
             executable="orbvi_ros_bridge_node",
             name="orbvi_ros_bridge",
             output="screen",
-            parameters=node_parameters,
+            parameters=[pano_config, parameters],
         ),
     ])
-
-
-def generate_launch_description():
-    parameters = dict(DEFAULT_BRIDGE_PARAMETERS)
-    parameters["host"] = LaunchConfiguration("host")
-    parameters["streams"] = LaunchConfiguration("streams")
-    parameters["publish_lidar_pcl"] = LaunchConfiguration("publish_lidar_pcl")
-    parameters["sensor_data_best_effort"] = LaunchConfiguration("sensor_data_best_effort")
-    parameters["ipm_extent_m"] = LaunchConfiguration("ipm_extent_m")
-    parameters["ipm_resolution_m_per_pixel"] = LaunchConfiguration("ipm_resolution_m_per_pixel")
-    parameters["ipm_max_publish_rate_hz"] = LaunchConfiguration("ipm_max_publish_rate_hz")
-    parameters["ipm_frame_id"] = ParameterValue(LaunchConfiguration("ipm_frame_id"), value_type=str)
-    parameters["publish_ipm"] = LaunchConfiguration("publish_ipm")
-    parameters["depth_viz_show_grid_values"] = LaunchConfiguration(
-        "depth_viz_show_grid_values")
-    parameters["publish_vio_path"] = LaunchConfiguration("publish_vio_path")
-    parameters["depth_pointcloud_frame_id"] = ParameterValue(
-        LaunchConfiguration("depth_pointcloud_frame_id"), value_type=str)
-    parameters["tf_mode"] = ParameterValue(LaunchConfiguration("tf_mode"), value_type=str)
-    parameters["mounting_config"] = ParameterValue(LaunchConfiguration("mounting_config"), value_type=str)
-    parameters["publish_mounting_tf"] = LaunchConfiguration("publish_mounting_tf")
-    parameters["publish_odom_tf"] = LaunchConfiguration("publish_odom_tf")
-    parameters["odom_frame"] = ParameterValue(LaunchConfiguration("odom_frame"), value_type=str)
-    parameters["publish_vio_tf"] = LaunchConfiguration("publish_vio_tf")
-    parameters["publish_sensor_tf"] = LaunchConfiguration("publish_sensor_tf")
-    parameters["vio_path_max_poses"] = LaunchConfiguration("vio_path_max_poses")
-    parameters["vio_path_publish_rate_hz"] = LaunchConfiguration(
-        "vio_path_publish_rate_hz")
-    return bridge_launch_description(parameters)

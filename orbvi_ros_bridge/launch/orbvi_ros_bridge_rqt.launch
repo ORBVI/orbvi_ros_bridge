@@ -1,0 +1,4 @@
+<launch>
+  <!-- rqt main window for checking bridge topics: add Topic Monitor / Image View from Plugins. -->
+  <node pkg="rqt_gui" type="rqt_gui" name="rqt" output="screen"/>
+</launch>

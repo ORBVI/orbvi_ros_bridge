@@ -52,8 +52,8 @@ ROS_BODY 深度点云直接使用 `orbvi_link`，无须再发布重合的 depth 
 ROS1/ROS2 使用现有 `mounting_config` 参数的特殊值 `sdk`：
 
 ```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py \
-  host:=DEVICE_IP tf_mode:=robot mounting_config:=sdk \
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py \
+  tf_mode:=robot mounting_config:=sdk \
   publish_mounting_tf:=true publish_ipm:=true
 ```
 
@@ -105,23 +105,23 @@ orbvi:
 ROS1，由 URDF 发布安装边：
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch \
-  host:=DEVICE_IP tf_mode:=robot \
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch \
+  tf_mode:=robot \
   mounting_config:=/absolute/path/mounting-urdf.yaml
 ```
 
 需要由本地 YAML/URDF 定义 TF 时，继续使用以下兼容方式：
 
 ```bash
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py \
-  host:=DEVICE_IP tf_mode:=robot mounting_config:=/absolute/path/mounting-inverted.yaml \
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py \
+  tf_mode:=robot mounting_config:=/absolute/path/mounting-inverted.yaml \
   publish_mounting_tf:=true publish_ipm:=true
 ```
 
 该模式不把本地 YAML 自动写入板端；板端 GPU 参数必须与经过审计的 TF/地面平面一致，
 否则 IPM 被拒绝。新增部署优先选择 `mounting_config:=sdk`，避免重复维护安装参数。
 
-三套 launch 在 ROS1/ROS2 中均透传上述参数。URDF 模式迁移时，删除原 bridge YAML
+4V/4VL 两套 launch 在 ROS1/ROS2 中均透传上述参数。URDF 模式迁移时，删除原 bridge YAML
 中的 xyz/rpy；继续使用旧数值配置会明确报错，不会悄悄回退到第二份安装真值。
 自定义 parent/child 名称受支持。ROS_BODY 深度点云默认使用 child_frame；显式
 `depth_pointcloud_frame_id` 必须与 child_frame 一致。frame 冲突、非法数值、重复键
@@ -138,7 +138,7 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_mid360.launch.py \
 <arg name="mounting_config"/>
 <param name="robot_description" command="$(find xacro)/xacro $(find orbvi_ros_bridge)/config/robot-mount.example.urdf.xacro publish_mounting_tf:=$(arg publish_mounting_tf)"/>
 <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"/>
-<include file="$(find orbvi_ros_bridge)/launch/orbvi_ros_bridge_mid360.launch">
+<include file="$(find orbvi_ros_bridge)/launch/orbvi_ros_bridge_4vl.launch">
   <arg name="tf_mode" value="robot"/>
   <arg name="mounting_config" value="$(arg mounting_config)"/>
   <arg name="publish_mounting_tf" value="$(arg publish_mounting_tf)"/>
@@ -271,9 +271,9 @@ bridge 几何测试覆盖安装旋转、平移杆臂、逆变换、完整树及�
 以该仓库本轮验证记录为准。
 
 RViz 可沿用仓库的 `visuallize_config/rviz-config.rviz`（ROS1）或
-`rviz-config-ros2.rviz`（ROS2），已有 Sensor TF display。有优化位姿时 Fixed Frame
-使用 `camera_init`（开启启动 odom 时可用 `odom`）；仅静态传感器时改为安装
-parent（默认 `base_link`）。
+`rviz-config-ros2.rviz`（ROS2），已有 Sensor TF display。默认 Fixed Frame 为
+`orbvi_link`；查看机器人位姿时改为 `camera_init`（开启启动 odom 时可用 `odom`），
+仅静态传感器时改为安装 parent（默认 `base_link`）。
 添加 Image display 查看 `/orbvi/ipm/image`；图像上方为机器人前方。
 
 快速检查发布与连通性：

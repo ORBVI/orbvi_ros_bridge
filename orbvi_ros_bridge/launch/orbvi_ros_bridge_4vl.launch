@@ -1,7 +1,7 @@
 <launch>
-  <!-- Visual entry: cameras, device IMU, disparity, depth and VIO. -->
-  <arg name="host" default="127.0.0.1" doc="ORBVI device IP or hostname"/>
-  <arg name="streams" default="raw,rectified,imu,disparity,depth,vio" doc="Comma-separated bridge streams"/>
+  <!-- 4VL entry: four cameras with LiDAR (cameras, panorama, BEV, IMU, MID360 point cloud and IMU, disparity, depth, VIO). -->
+  <arg name="host" default="192.168.3.100" doc="ORBVI device IP or hostname"/>
+  <arg name="streams" default="raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio" doc="Comma-separated bridge streams"/>
   <arg name="publish_lidar_pcl" default="false" doc="Publish Livox CustomMsg as sensor_msgs/PointCloud2 on topic_prefix/lidar/points"/>
   <arg name="ipm_extent_m" default="10.0"/>
   <arg name="ipm_resolution_m_per_pixel" default="0.02"/>
@@ -42,5 +42,6 @@
     <param name="vio_path_max_poses" value="$(arg vio_path_max_poses)"/>
     <param name="vio_path_publish_rate_hz" value="$(arg vio_path_publish_rate_hz)"/>
     <param name="streams" value="$(arg streams)"/>
+    <rosparam command="load" file="$(find orbvi_ros_bridge)/config/pano_mode2.yaml"/>
   </node>
 </launch>

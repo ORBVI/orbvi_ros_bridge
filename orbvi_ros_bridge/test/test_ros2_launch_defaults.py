@@ -10,9 +10,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 USER_LAUNCHES = (
-    "orbvi_ros_bridge.launch.py",
-    "orbvi_ros_bridge_mid360.launch.py",
-    "orbvi_ros_bridge_pano.launch.py",
+    "orbvi_ros_bridge_4v.launch.py",
+    "orbvi_ros_bridge_4vl.launch.py",
 )
 
 

@@ -1,3 +1,4 @@
+"""4V entry: all visual capabilities (cameras, panorama, BEV, IMU, disparity, depth, VIO)."""
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -7,8 +8,8 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 ARGUMENT_DEFAULTS = {
-    "host": "127.0.0.1",
-    "streams": "raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio",
+    "host": "192.168.3.100",
+    "streams": "raw,rectified,pano,bev,imu,disparity,depth,vio",
     "publish_lidar_pcl": "false",
     "sensor_data_best_effort": "false",
     "ipm_extent_m": "10.0",
@@ -30,11 +31,16 @@ ARGUMENT_DEFAULTS = {
 }
 
 DEFAULT_BRIDGE_PARAMETERS = {
-    "streams": "raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio",
+    "streams": "raw,rectified,pano,bev,imu,disparity,depth,vio",
 }
 
 
 def generate_launch_description():
+    pano_config = PathJoinSubstitution([
+        FindPackageShare("orbvi_ros_bridge"),
+        "config",
+        "pano_mode2_ros2.yaml",
+    ])
     fastdds_shm_profile = PathJoinSubstitution([
         FindPackageShare("orbvi_ros_bridge"),
         "config",
@@ -120,6 +126,6 @@ def generate_launch_description():
             executable="orbvi_ros_bridge_node",
             name="orbvi_ros_bridge",
             output="screen",
-            parameters=[parameters],
+            parameters=[pano_config, parameters],
         ),
     ])

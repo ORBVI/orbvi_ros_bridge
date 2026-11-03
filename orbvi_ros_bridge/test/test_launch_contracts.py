@@ -8,24 +8,21 @@ import xml.etree.ElementTree as ET
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
-VISUAL_STREAMS = "raw,rectified,imu,disparity,depth,vio"
-MID360_STREAMS = "raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio"
-PANO_STREAMS = "raw,rectified,pano,bev,imu,disparity,depth,vio"
+FOUR_V_STREAMS = "raw,rectified,pano,bev,imu,disparity,depth,vio"
+FOUR_VL_STREAMS = "raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio"
 
 ROS1_USER_LAUNCHES = {
-    "orbvi_ros_bridge.launch": VISUAL_STREAMS,
-    "orbvi_ros_bridge_mid360.launch": MID360_STREAMS,
-    "orbvi_ros_bridge_pano.launch": PANO_STREAMS,
+    "orbvi_ros_bridge_4v.launch": FOUR_V_STREAMS,
+    "orbvi_ros_bridge_4vl.launch": FOUR_VL_STREAMS,
 }
 
 ROS2_USER_LAUNCHES = {
-    "orbvi_ros_bridge.launch.py": VISUAL_STREAMS,
-    "orbvi_ros_bridge_mid360.launch.py": MID360_STREAMS,
-    "orbvi_ros_bridge_pano.launch.py": PANO_STREAMS,
+    "orbvi_ros_bridge_4v.launch.py": FOUR_V_STREAMS,
+    "orbvi_ros_bridge_4vl.launch.py": FOUR_VL_STREAMS,
 }
 
 USER_ARGUMENT_DEFAULTS = {
-    "host": "127.0.0.1",
+    "host": "192.168.3.100",
     "publish_lidar_pcl": "false",
     "ipm_extent_m": "10.0",
     "ipm_resolution_m_per_pixel": "0.02",
@@ -130,18 +127,18 @@ def yaml_scalar_defaults(path):
 
 
 class LaunchContractTest(unittest.TestCase):
-    def test_ros1_exposes_three_user_launch_configs(self):
+    def test_ros1_exposes_bridge_and_viewer_launch_configs(self):
         launch_names = sorted(path.name for path in (PACKAGE_ROOT / "launch").glob("orbvi_ros_bridge*.launch"))
         self.assertEqual(
             launch_names,
-            sorted([*ROS1_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch"]),
+            sorted([*ROS1_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch", "orbvi_ros_bridge_rqt.launch"]),
         )
 
-    def test_ros2_exposes_three_user_launch_configs(self):
+    def test_ros2_exposes_bridge_and_viewer_launch_configs(self):
         launch_names = sorted(path.name for path in (PACKAGE_ROOT / "launch" / "ros2").glob("orbvi_ros_bridge*.launch.py"))
         self.assertEqual(
             launch_names,
-            sorted([*ROS2_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch.py"]),
+            sorted([*ROS2_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch.py", "orbvi_ros_bridge_rqt.launch.py"]),
         )
 
     def test_ros1_launch_configs_expose_supported_user_arguments(self):
@@ -178,8 +175,6 @@ class LaunchContractTest(unittest.TestCase):
                     ros1_param_value(path, "vio_path_publish_rate_hz"),
                     "$(arg vio_path_publish_rate_hz)",
                 )
-                self.assertNotIn("pano", VISUAL_STREAMS.split(","))
-                self.assertIn("pano", PANO_STREAMS.split(","))
 
     def test_ros2_launch_configs_expose_supported_user_arguments(self):
         for launch_name, expected_streams in ROS2_USER_LAUNCHES.items():
@@ -222,22 +217,48 @@ class LaunchContractTest(unittest.TestCase):
                     source,
                 )
 
-    def test_only_pano_launch_loads_pano_config(self):
+    def test_4vl_streams_are_4v_streams_with_lidar(self):
+        four_v = FOUR_V_STREAMS.split(",")
+        four_vl = FOUR_VL_STREAMS.split(",")
+        for stream in ("pano", "bev", "depth", "vio"):
+            self.assertIn(stream, four_v)
+        self.assertNotIn("lidar", four_v)
+        self.assertEqual(sorted(set(four_vl) - set(four_v)), ["lidar", "lidar_imu"])
+        self.assertTrue(set(four_v).issubset(four_vl))
+
+    def test_every_user_launch_loads_pano_config(self):
         for launch_name in ROS1_USER_LAUNCHES:
             with self.subTest(ros="ros1", launch_name=launch_name):
                 files = ros1_rosparam_files(PACKAGE_ROOT / "launch" / launch_name)
-                if launch_name == "orbvi_ros_bridge_pano.launch":
-                    self.assertEqual(files, ["$(find orbvi_ros_bridge)/config/pano_mode2.yaml"])
-                else:
-                    self.assertEqual(files, [])
+                self.assertEqual(files, ["$(find orbvi_ros_bridge)/config/pano_mode2.yaml"])
         for launch_name in ROS2_USER_LAUNCHES:
             with self.subTest(ros="ros2", launch_name=launch_name):
                 source = (PACKAGE_ROOT / "launch" / "ros2" / launch_name).read_text(encoding="utf-8")
-                if launch_name == "orbvi_ros_bridge_pano.launch.py":
-                    self.assertIn("\"pano_mode2_ros2.yaml\"", source)
-                else:
-                    self.assertNotIn("pano_mode2_ros2.yaml", source)
+                self.assertIn("\"pano_mode2_ros2.yaml\"", source)
                 self.assertNotIn("LaunchConfiguration(\"pano_config\")", source)
+
+    def test_ros2_launches_share_fastdds_shm_environment(self):
+        expected = (
+            'SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_fastrtps_cpp")',
+            'SetEnvironmentVariable(name="FASTRTPS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile)',
+            'SetEnvironmentVariable(name="FASTDDS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile)',
+            'SetEnvironmentVariable(name="RMW_FASTRTPS_PUBLICATION_MODE", value="ASYNCHRONOUS")',
+            '"fastdds_shm.xml"',
+        )
+        launch_names = [*ROS2_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch.py", "orbvi_ros_bridge_rqt.launch.py"]
+        for launch_name in launch_names:
+            with self.subTest(launch_name=launch_name):
+                source = (PACKAGE_ROOT / "launch" / "ros2" / launch_name).read_text(encoding="utf-8")
+                for line in expected:
+                    self.assertIn(line, source)
+
+    def test_rqt_launches_start_rqt_gui(self):
+        root = ET.parse(PACKAGE_ROOT / "launch" / "orbvi_ros_bridge_rqt.launch").getroot()
+        nodes = [(node.attrib.get("pkg"), node.attrib.get("type")) for node in root.findall("node")]
+        self.assertEqual(nodes, [("rqt_gui", "rqt_gui")])
+        source = (PACKAGE_ROOT / "launch" / "ros2" / "orbvi_ros_bridge_rqt.launch.py").read_text(encoding="utf-8")
+        self.assertIn('package="rqt_gui"', source)
+        self.assertIn('executable="rqt_gui"', source)
 
     def test_default_pano_configs_use_rotation_extrinsics_without_stale_depth(self):
         for config_name in ("pano_mode2.yaml", "pano_mode2_ros2.yaml"):

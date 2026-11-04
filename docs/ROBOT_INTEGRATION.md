@@ -272,8 +272,9 @@ bridge 几何测试覆盖安装旋转、平移杆臂、逆变换、完整树及�
 
 RViz 可沿用仓库的 `visuallize_config/rviz-config.rviz`（ROS1）或
 `rviz-config-ros2.rviz`（ROS2），已有 Sensor TF display。默认 Fixed Frame 为
-`orbvi_link`；查看机器人位姿时改为 `camera_init`（开启启动 odom 时可用 `odom`），
-仅静态传感器时改为安装 parent（默认 `base_link`）。
+`camera_init`，可直接查看机器人位姿（开启启动 odom 时可用 `odom`）；
+仅静态传感器时改为安装 parent（默认 `base_link`）。各坐标系的选择见
+[查看数据](VIEWING.zh-CN.md#fixed-frame-选择)。
 添加 Image display 查看 `/orbvi/ipm/image`；图像上方为机器人前方。
 
 快速检查发布与连通性：

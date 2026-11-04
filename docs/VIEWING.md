@@ -9,11 +9,36 @@ front (3), right (2), rear (4), left (5), with the point-cloud view below.
 These directions refer to the device; use TF for robot mounting directions.
 Reopen the default RViz launch to load the layout.
 
-The ROS2 RViz config enables `Color Depth Points`, `LiDAR Points` and TF in
-`orbvi_link` by default, showing device-frame depth without a localization TF.
-Start the 4VL bridge launch with `publish_lidar_pcl:=true` to view depth, LiDAR
-and poses together when the calibrated TF tree is complete. Pass
-`fixed_frame:=livox_frame` to view raw LiDAR independently.
+The ROS1/ROS2 RViz configs and launch files default to Fixed Frame
+`camera_init`, the 4VL Omni-LIVO world, so depth, LiDAR and the trajectory are
+shown together in the world while the device moves. This requires the bridge's
+dynamic TF from `camera_init` (`publish_vio_tf`, on by default; child `aft_mapped`, or `base_link` in robot mode) and the
+calibrated sensor TF tree; start the 4VL bridge launch with
+`publish_lidar_pcl:=true` to include LiDAR points. Without a localization TF,
+pass another frame, e.g. `fixed_frame:=orbvi_link`:
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch fixed_frame:=orbvi_link
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py fixed_frame:=orbvi_link
+```
+
+### Fixed Frame choices
+
+| Frame | Meaning | Use it to view |
+| --- | --- | --- |
+| `camera_init` (default) | Omni-LIVO world fixed at initialization: gravity-aligned Z-up, origin at the initial MID360 IMU, yaw not tied to the robot front | 4VL trajectory, map/scan clouds, and depth/LiDAR placed in the world |
+| `odom` | Optional startup origin above `camera_init` (`tf_mode:=robot publish_odom_tf:=true`): origin on the ground below the robot, yaw along the initial robot front | Robot motion starting from zero |
+| `world` | 4V VINS world | 4V trajectory only; not connected to the depth tree yet |
+| `aft_mapped` / `mid360_imu` | Current MID360 IMU state (moves with the device); `mid360_imu` is the same physical frame | IMU-centred view of the device |
+| `orbvi_link` | Device-fixed SDK ROS_BODY reference: camera-rig origin, axes forward/left/up | Depth in device coordinates, depth/LiDAR alignment; needs no localization TF |
+| `base_link` | Robot body (robot mode, from URDF or `mounting_config`) | Data in robot coordinates |
+| `livox_frame` | MID360 point coordinates | Raw LiDAR alone |
+| `orbvi/camera/<id>` | Raw camera optical frames (right/down/forward), IDs 3/2/4/5 = front/right/rear/left | Checking a single camera's projection |
+
+Frames move with the device except `camera_init`, `odom` and `world`. With a
+device-fixed frame the device stays still and the world moves; with a world
+frame the device moves. See [TF](TF.md) and
+[robot integration](ROBOT_INTEGRATION.md) for the full trees.
 
 Point clouds, odometry, and the trajectory can be viewed in RViz:
 

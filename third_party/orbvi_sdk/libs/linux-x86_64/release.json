@@ -65,8 +65,8 @@
     "include/orbvi_sdk/version.hpp": "43c93f281690dc05671c7cd15c71e2c3861b296c6341a4bef00bbf9f6d5e6fed",
     "include/orbvi_time_contract/clock_status_provider.hpp": "cf183e94127a791b3f827bc2552f723810daf41c388bb60a7f1a5a6d3275ac6e",
     "include/orbvi_time_contract/status.hpp": "c8a8b365d6d579b7ef2c951ce7581fbc36c8a9d02ece17b5811d521cbefeecd7",
-    "lib/liborbvi_sdk.so.2.0.0": "71616118ddf8434213dcfb512410716e29b437c8a7b2a8cf97ff2f8de53a3797",
-    "lib/liborbvi_sdk.a": "bd9d35059e6dc83fdd508b1ff8b55fa4f40742102cef6e8d3eb9277e87608d8d",
+    "lib/liborbvi_sdk.so.2.0.0": "d9b237efb7885bb401ea33a91a97107f7ab2401e3e57d00ad759acde15d4fe9f",
+    "lib/liborbvi_sdk.a": "0ce870343924bc1207c6973edc0b366bdda192466f6c9d933c714dc1b8662fe9",
     "lib/orbvi_sdk/third_party/liborbvi_sdk_turbojpeg.a": "3ff099f7c7e0055b2fd14e7a56befab825e3681c593e98cfe0303f8116f75ead",
     "lib/orbvi_sdk/third_party/liborbvi_sdk_spdlog.a": "4ab507f3f40b4c231d62dde0fa7dee66311af83eb92ae9058e6e5a7765e80faf"
   }

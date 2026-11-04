@@ -6,7 +6,7 @@ Plugins > Visualization > Image View to look at images.
 """
 from launch import LaunchDescription
 from launch.actions import SetEnvironmentVariable
-from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import EnvironmentVariable, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -19,10 +19,24 @@ def generate_launch_description():
     ])
 
     return LaunchDescription([
-        SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_fastrtps_cpp"),
-        SetEnvironmentVariable(name="FASTRTPS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile),
-        SetEnvironmentVariable(name="FASTDDS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile),
-        SetEnvironmentVariable(name="RMW_FASTRTPS_PUBLICATION_MODE", value="ASYNCHRONOUS"),
+        SetEnvironmentVariable(
+            name="RMW_IMPLEMENTATION",
+            value=EnvironmentVariable("RMW_IMPLEMENTATION", default_value="rmw_fastrtps_cpp")),
+        SetEnvironmentVariable(
+            name="FASTRTPS_DEFAULT_PROFILES_FILE",
+            value=EnvironmentVariable(
+                "FASTRTPS_DEFAULT_PROFILES_FILE",
+                default_value=EnvironmentVariable(
+                    "FASTDDS_DEFAULT_PROFILES_FILE", default_value=fastdds_shm_profile))),
+        SetEnvironmentVariable(
+            name="FASTDDS_DEFAULT_PROFILES_FILE",
+            value=EnvironmentVariable(
+                "FASTDDS_DEFAULT_PROFILES_FILE",
+                default_value=EnvironmentVariable(
+                    "FASTRTPS_DEFAULT_PROFILES_FILE", default_value=fastdds_shm_profile))),
+        SetEnvironmentVariable(
+            name="RMW_FASTRTPS_PUBLICATION_MODE",
+            value=EnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE", default_value="ASYNCHRONOUS")),
         Node(
             package="rqt_gui",
             executable="rqt_gui",

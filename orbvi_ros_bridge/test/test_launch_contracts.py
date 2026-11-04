@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
 import ast
+import os
 from pathlib import Path
+import runpy
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 
 
@@ -237,21 +240,6 @@ class LaunchContractTest(unittest.TestCase):
                 self.assertIn("\"pano_mode2_ros2.yaml\"", source)
                 self.assertNotIn("LaunchConfiguration(\"pano_config\")", source)
 
-    def test_ros2_launches_share_fastdds_shm_environment(self):
-        expected = (
-            'SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_fastrtps_cpp")',
-            'SetEnvironmentVariable(name="FASTRTPS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile)',
-            'SetEnvironmentVariable(name="FASTDDS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile)',
-            'SetEnvironmentVariable(name="RMW_FASTRTPS_PUBLICATION_MODE", value="ASYNCHRONOUS")',
-            '"fastdds_shm.xml"',
-        )
-        launch_names = [*ROS2_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch.py", "orbvi_ros_bridge_rqt.launch.py"]
-        for launch_name in launch_names:
-            with self.subTest(launch_name=launch_name):
-                source = (PACKAGE_ROOT / "launch" / "ros2" / launch_name).read_text(encoding="utf-8")
-                for line in expected:
-                    self.assertIn(line, source)
-
     def test_rqt_launches_start_rqt_gui(self):
         root = ET.parse(PACKAGE_ROOT / "launch" / "orbvi_ros_bridge_rqt.launch").getroot()
         nodes = [(node.attrib.get("pkg"), node.attrib.get("type")) for node in root.findall("node")]
@@ -285,6 +273,72 @@ class LaunchContractTest(unittest.TestCase):
                 ).read_text(encoding="utf-8")
                 for expected in expectations:
                     self.assertIn(expected, source)
+
+
+class Ros2LaunchEnvironmentTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from launch import LaunchContext
+            from launch.actions import SetEnvironmentVariable
+            from launch_ros.substitutions import FindPackageShare
+        except ImportError:
+            raise unittest.SkipTest("ROS2 launch packages are unavailable")
+        cls.context_type = LaunchContext
+        cls.environment_action_type = SetEnvironmentVariable
+        cls.package_share_type = FindPackageShare
+
+    def test_launches_inherit_environment_and_only_fill_missing_defaults(self):
+        default_profile = str(PACKAGE_ROOT / "config" / "fastdds_shm.xml")
+        defaults = {
+            "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+            "FASTRTPS_DEFAULT_PROFILES_FILE": default_profile,
+            "FASTDDS_DEFAULT_PROFILES_FILE": default_profile,
+            "RMW_FASTRTPS_PUBLICATION_MODE": "ASYNCHRONOUS",
+        }
+        inherited = {
+            "ROS_DOMAIN_ID": "47",
+            "ROS_LOCALHOST_ONLY": "1",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",
+            "ROS_STATIC_PEERS": "127.0.0.1",
+            "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp",
+            "FASTRTPS_DEFAULT_PROFILES_FILE": "/tmp/custom-legacy.xml",
+            "FASTDDS_DEFAULT_PROFILES_FILE": "/tmp/custom-modern.xml",
+            "RMW_FASTRTPS_PUBLICATION_MODE": "SYNCHRONOUS",
+        }
+        cases = [
+            ({}, defaults),
+            (inherited, inherited),
+            ({"FASTRTPS_DEFAULT_PROFILES_FILE": "/tmp/legacy.xml"},
+             dict(defaults, FASTRTPS_DEFAULT_PROFILES_FILE="/tmp/legacy.xml",
+                  FASTDDS_DEFAULT_PROFILES_FILE="/tmp/legacy.xml")),
+            ({"FASTDDS_DEFAULT_PROFILES_FILE": "/tmp/modern.xml"},
+             dict(defaults, FASTRTPS_DEFAULT_PROFILES_FILE="/tmp/modern.xml",
+                  FASTDDS_DEFAULT_PROFILES_FILE="/tmp/modern.xml")),
+            (dict.fromkeys(defaults, ""), dict.fromkeys(defaults, "")),
+        ]
+        names = [*ROS2_USER_LAUNCHES, "orbvi_ros_bridge_rviz.launch.py",
+                 "orbvi_ros_bridge_rqt.launch.py"]
+        for name in names:
+            description = runpy.run_path(str(PACKAGE_ROOT / "launch" / "ros2" / name))[
+                "generate_launch_description"]()
+            for supplied, expected in cases:
+                with self.subTest(launch=name, supplied=supplied):
+                    environment = {key: value for key, value in os.environ.items()
+                                   if key not in {*defaults, *inherited}}
+                    environment.update(supplied)
+                    with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
+                        self.package_share_type, "find", return_value=str(PACKAGE_ROOT)
+                    ):
+                        context = self.context_type()
+                        for action in description.entities:
+                            if isinstance(action, self.environment_action_type):
+                                action.execute(context)
+                        for key, value in expected.items():
+                            self.assertEqual(context.environment.get(key), value, key)
+                        for key in ("ROS_DOMAIN_ID", "ROS_LOCALHOST_ONLY",
+                                    "ROS_AUTOMATIC_DISCOVERY_RANGE", "ROS_STATIC_PEERS"):
+                            self.assertEqual(context.environment.get(key), supplied.get(key), key)
 
 
 if __name__ == "__main__":

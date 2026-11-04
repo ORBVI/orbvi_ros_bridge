@@ -393,6 +393,10 @@ else()
     NAME test_orbvi_ros_bridge_launch_contracts
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_contracts.py
   )
+  # ROS2 launch modules are always available here, so a skipped case means broken setup.
+  set_tests_properties(test_orbvi_ros_bridge_launch_contracts PROPERTIES
+    FAIL_REGULAR_EXPRESSION "skipped="
+  )
   if(BUILD_TESTING)
     add_test(
       NAME test_orbvi_ros_bridge_ros2_launch_defaults

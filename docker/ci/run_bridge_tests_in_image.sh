@@ -40,10 +40,7 @@ if [ -f /opt/ros/humble/setup.bash ]; then
 else
   source /opt/ros/foxy/setup.bash
 fi
-cd /workspace/project/ci_ws
-colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
-colcon test --packages-select orbvi_ros_bridge
-colcon test-result --verbose
+/workspace/project/docker/ci/run_ros2_colcon_tests.sh /workspace/project/ci_ws
 '
     ;;
   *)

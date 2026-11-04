@@ -126,6 +126,7 @@ docker:ros2:orbvi:arm64:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH || $CI_COMMIT_TAG'
       changes:
         - .gitlab-ci.yml
+        - docker/ci/run_ros2_colcon_tests.sh
         - livox_ros_driver2/**/*
         - orbvi_ros_bridge/**/*
         - third_party/orbvi_sdk/**/*
@@ -173,10 +174,7 @@ docker:ros2:orbvi:arm64:
   script:
     - ln -s "${CI_PROJECT_DIR}" "${CI_PROJECT_DIR}/ci_ws/src/orbvi_ros_bridge"
     - source /opt/ros/foxy/setup.bash
-    - cd "${CI_PROJECT_DIR}/ci_ws"
-    - colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
-    - colcon test --packages-select orbvi_ros_bridge
-    - colcon test-result --verbose
+    - docker/ci/run_ros2_colcon_tests.sh "${CI_PROJECT_DIR}/ci_ws"
 
 ros1:ubuntu:x86_64:
   extends: .ros1_test

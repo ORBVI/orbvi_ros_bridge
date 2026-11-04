@@ -20,8 +20,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "fixed_frame",
-            default_value="orbvi_link",
-            description="Fixed frame: orbvi_link for depth, livox_frame for LiDAR; poses use their header frame (4VL: camera_init).",
+            default_value="camera_init",
+            description="Fixed frame: camera_init for 4VL poses (default), orbvi_link for device-frame depth, livox_frame for raw LiDAR, world for 4V VINS.",
         ),
         SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_fastrtps_cpp"),
         SetEnvironmentVariable(name="FASTRTPS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile),

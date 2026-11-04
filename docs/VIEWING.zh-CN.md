@@ -8,10 +8,33 @@ ROS1/ROS2 默认 RViz 布局将四路原始相机固定在顶部一排，顺序�
 前（3）、右（2）、后（4）、左（5），下方为点云视图。方向名称指设备本身方向，
 机器人安装后的方向以 TF 为准。重新打开默认 RViz launch 即可加载该布局。
 
-ROS2 自带 RViz 配置默认启用 `Color Depth Points`、`LiDAR Points` 和 TF 显示，
-固定坐标系为 `orbvi_link`，直接显示设备坐标系下的深度点云，不依赖定位 TF。
-使用 4VL bridge launch 并传入 `publish_lidar_pcl:=true`，在完整标定 TF 下可同时
-查看深度点云、雷达和轨迹。单独查看原始雷达时可传入 `fixed_frame:=livox_frame`。
+ROS1/ROS2 自带 RViz 配置与 launch 默认 Fixed Frame 为 `camera_init`
+（4VL Omni-LIVO 世界系），设备移动时深度点云、雷达和轨迹统一显示在世界系中。
+这依赖 bridge 发布的从 `camera_init` 出发的动态 TF（`publish_vio_tf`，默认开启；子坐标系为 `aft_mapped`，机器人模式为 `base_link`）
+和完整标定的传感器 TF；4VL bridge launch 传入 `publish_lidar_pcl:=true` 可加入雷达点云。
+没有定位 TF 时改用其他坐标系，例如 `fixed_frame:=orbvi_link`：
+
+```bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch fixed_frame:=orbvi_link
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py fixed_frame:=orbvi_link
+```
+
+### Fixed Frame 选择
+
+| 坐标系 | 含义 | 适合查看 |
+| --- | --- | --- |
+| `camera_init`（默认） | Omni-LIVO 初始化时固定的世界系：重力对齐、Z 轴向上，原点在初始化时的 MID360 IMU，yaw 不保证朝机器人前方 | 4VL 轨迹、scan/map 点云，以及放到世界中的深度/雷达 |
+| `odom` | `camera_init` 之上的可选启动原点（`tf_mode:=robot publish_odom_tf:=true`）：原点为机器人下方地面投影，yaw 对齐初始机器人前方 | 从零开始的机器人运动 |
+| `world` | 4V VINS 世界系 | 仅 4V 轨迹；目前与深度点云的树不连通 |
+| `aft_mapped` / `mid360_imu` | 当前 MID360 IMU 状态系（随设备运动）；`mid360_imu` 是同一物理坐标系 | 以 IMU 为中心观察设备 |
+| `orbvi_link` | 设备固连的 SDK ROS_BODY 参考系：原点为相机 rig 参考原点，轴向前/左/上 | 设备系下的深度点云、深度与雷达对齐检查；不依赖定位 TF |
+| `base_link` | 机器人本体系（机器人模式，由 URDF 或 `mounting_config` 提供） | 机器人坐标下的数据 |
+| `livox_frame` | MID360 点云坐标系 | 单独查看原始雷达 |
+| `orbvi/camera/<id>` | 原始相机光学系（右/下/前），ID 3/2/4/5 对应前/右/后/左 | 检查单路相机投影 |
+
+除 `camera_init`、`odom`、`world` 外，其余坐标系都随设备运动：选设备固连系时设备
+不动、世界在动；选世界系时设备在动。完整 TF 树见 [TF](TF.md) 与
+[机器人安装与 TF](ROBOT_INTEGRATION.md)。
 
 点云、里程计和轨迹可在 RViz 中查看：
 

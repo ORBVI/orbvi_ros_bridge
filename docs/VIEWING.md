@@ -81,7 +81,14 @@ ros-$ROS_DISTRO-rqt-image-view`.
 
 ## ROS2 Transport and Discovery
 
-The ROS2 bridge, RViz and rqt launch files all set the bundled Fast DDS
+The ROS2 bridge, RViz and rqt launch files inherit `RMW_IMPLEMENTATION`,
+`FASTRTPS_DEFAULT_PROFILES_FILE`, `FASTDDS_DEFAULT_PROFILES_FILE` and
+`RMW_FASTRTPS_PUBLICATION_MODE`, filling project defaults only when a variable
+is unset. If only one profile path variable is set, the other uses that path;
+if both are set, each retains its value. `ROS_DOMAIN_ID`, `ROS_LOCALHOST_ONLY`,
+`ROS_AUTOMATIC_DISCOVERY_RANGE` and `ROS_STATIC_PEERS` are inherited directly.
+
+Without external configuration, the defaults use Fast DDS and the bundled
 profile: UDPv4 handles discovery, while local participants with SHM enabled
 exchange user data through shared memory. Ordinary ROS2 tools can therefore
 discover the bridge without loading a custom profile just to inspect topics.
@@ -106,6 +113,14 @@ the Domain, RMW or profile, restart affected processes and stop the old
 `ros2 daemon` so queries do not retain its previous environment. Running
 processes do not reload profile changes; migrating from the old SHM-only
 profile requires restarting both the bridge and viewers.
+
+For local use, set `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` and clear remote
+`ROS_STATIC_PEERS` in the shared startup environment before starting the
+bridge, viewers and tools. Existing `ROS_LOCALHOST_ONLY=1` configurations
+are also honored in Jazzy. The project does not fix the domain ID or read
+`.zshrc` itself; services, IDEs and scripts must pass the environment to their
+child processes. Changing variables in another terminal does not update
+running nodes.
 
 First confirm discovery with `ros2 node list --no-daemon`, then check actual
 delivery with `ros2 topic hz /orbvi/imu`. A running process or a listed topic

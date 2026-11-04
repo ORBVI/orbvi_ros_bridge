@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -23,10 +23,24 @@ def generate_launch_description():
             default_value="camera_init",
             description="Fixed frame: camera_init for 4VL poses (default), orbvi_link for device-frame depth, livox_frame for raw LiDAR, world for 4V VINS.",
         ),
-        SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_fastrtps_cpp"),
-        SetEnvironmentVariable(name="FASTRTPS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile),
-        SetEnvironmentVariable(name="FASTDDS_DEFAULT_PROFILES_FILE", value=fastdds_shm_profile),
-        SetEnvironmentVariable(name="RMW_FASTRTPS_PUBLICATION_MODE", value="ASYNCHRONOUS"),
+        SetEnvironmentVariable(
+            name="RMW_IMPLEMENTATION",
+            value=EnvironmentVariable("RMW_IMPLEMENTATION", default_value="rmw_fastrtps_cpp")),
+        SetEnvironmentVariable(
+            name="FASTRTPS_DEFAULT_PROFILES_FILE",
+            value=EnvironmentVariable(
+                "FASTRTPS_DEFAULT_PROFILES_FILE",
+                default_value=EnvironmentVariable(
+                    "FASTDDS_DEFAULT_PROFILES_FILE", default_value=fastdds_shm_profile))),
+        SetEnvironmentVariable(
+            name="FASTDDS_DEFAULT_PROFILES_FILE",
+            value=EnvironmentVariable(
+                "FASTDDS_DEFAULT_PROFILES_FILE",
+                default_value=EnvironmentVariable(
+                    "FASTRTPS_DEFAULT_PROFILES_FILE", default_value=fastdds_shm_profile))),
+        SetEnvironmentVariable(
+            name="RMW_FASTRTPS_PUBLICATION_MODE",
+            value=EnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE", default_value="ASYNCHRONOUS")),
         Node(
             package='rviz2',
             executable='rviz2',

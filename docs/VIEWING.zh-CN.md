@@ -72,7 +72,14 @@ rqt 会保存布局，下次启动时自动恢复。缺少插件时先安装，�
 
 ## ROS2 传输与发现
 
-ROS2 的 bridge、RViz 和 rqt launch 都会设置内置 Fast DDS profile：UDPv4 用于
+ROS2 的 bridge、RViz 和 rqt launch 优先继承启动环境中的 `RMW_IMPLEMENTATION`、
+`FASTRTPS_DEFAULT_PROFILES_FILE`、`FASTDDS_DEFAULT_PROFILES_FILE` 和
+`RMW_FASTRTPS_PUBLICATION_MODE`，仅在变量未设置时补充项目默认值。只设置一个
+profile 路径变量时，另一个沿用该路径；两个都设置时分别保留原值。
+`ROS_DOMAIN_ID`、`ROS_LOCALHOST_ONLY`、`ROS_AUTOMATIC_DISCOVERY_RANGE` 和
+`ROS_STATIC_PEERS` 直接继承，不由 launch 覆盖。
+
+没有外部配置时，默认使用 Fast DDS 与内置 profile：UDPv4 用于
 节点发现，同机且启用 SHM 的参与者通过共享内存传输业务数据。这样普通 ROS2
 工具也能发现 bridge，无需为查询 topic 而加载专用 profile。
 不要强制仅使用 SHM：它与默认使用 UDP 发现的参与者混用时可能互相不可见，详见
@@ -92,6 +99,12 @@ ros2 daemon stop
 Bridge、可视化和工具应使用相同的 `ROS_DOMAIN_ID`。更换 Domain、RMW 或 profile 后，
 重启相关进程并停止旧的 `ros2 daemon`，避免查询沿用旧环境。配置更新对已经运行的
 进程不生效；从旧的仅 SHM 配置迁移时，应同时重启 bridge 和可视化。
+
+仅需本机使用时，在统一的启动环境中设置 `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`
+并清除远端 `ROS_STATIC_PEERS`，再从该环境启动 bridge、RViz、rqt 和工具。已有的
+`ROS_LOCALHOST_ONLY=1` 在 Jazzy 中仍可使用。项目不固定域 ID，也不会主动读取
+`.zshrc`；通过服务、IDE 或脚本启动时，需要由启动者传入这些环境变量。
+仅在另一个终端修改变量，不会更新已运行的节点。
 
 排查时先用 `ros2 node list --no-daemon` 确认发现 bridge，再用
 `ros2 topic hz /orbvi/imu` 确认实际数据。进程存活或 topic 名称存在不能代替收帧验证。

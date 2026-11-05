@@ -55,7 +55,7 @@
     "include/orbvi_sdk/raw_atlas_contract.hpp": "ccc44d9685d7c4a0e3979152e5b413dc2dcd96206dad8e5ffedc5d3b0f90424c",
     "include/orbvi_sdk/recording.hpp": "a3696adf229712760d2b4c25b159020fe36ccbd0d0b20b715dc2ad7b8347774e",
     "include/orbvi_sdk/registered_cloud.hpp": "c55dd3fd10e0576d3a5751b83f3d76cd608223b2e0219652edfe63f396cec7ae",
-    "include/orbvi_sdk/status.hpp": "4b77b40586957909dd12c7a4fe12d78b465adcdb6355717972e6d08350ca6146",
+    "include/orbvi_sdk/status.hpp": "1253d14ec1d94107c39066e2b465d32a1f4c1ea5e20704b7f03c1637db5f4e21",
     "include/orbvi_sdk/subscription.hpp": "446f78c6bdce647c0f98afd475978fbb870f87e7d1af2f603bb5e34eb1b2e3a5",
     "include/orbvi_sdk/subscription_handle.hpp": "1e2b6bcb4728630d92bc8970402c6556a1650e537c3fa33184167c87422d1a8d",
     "include/orbvi_sdk/time_sync.hpp": "1a1b7826a37b80c64fdba280bb3cb792fc968c35757d71c7a5810c65d0098bc2",
@@ -65,8 +65,8 @@
     "include/orbvi_sdk/version.hpp": "43c93f281690dc05671c7cd15c71e2c3861b296c6341a4bef00bbf9f6d5e6fed",
     "include/orbvi_time_contract/clock_status_provider.hpp": "cf183e94127a791b3f827bc2552f723810daf41c388bb60a7f1a5a6d3275ac6e",
     "include/orbvi_time_contract/status.hpp": "c8a8b365d6d579b7ef2c951ce7581fbc36c8a9d02ece17b5811d521cbefeecd7",
-    "lib/liborbvi_sdk.so.2.0.0": "258e5fbe25986f32307f2c7bffddeadd1acfe7a4f1cdf91aba20888b08cdf177",
-    "lib/liborbvi_sdk.a": "03bdf0777e5dbab06a1b6ff69ddb49a5294cd6f09f7a95641e2f2073fcd04bb9",
+    "lib/liborbvi_sdk.so.2.0.0": "d31f0273ebd7191bdeac8c7da71f05c2e271e472e3d48299bbc89fae0b2f83f2",
+    "lib/liborbvi_sdk.a": "c8d89c02a0a12fb16c2ec710268750d5e06fd3361ced4b1c23741de4ae8f84b6",
     "lib/orbvi_sdk/third_party/liborbvi_sdk_turbojpeg.a": "b4c64f1cd5565a5412bdb91eb67d1b20a28726ea47ecf44b46931ffe1a135d90",
     "lib/orbvi_sdk/third_party/liborbvi_sdk_spdlog.a": "48b41a9a4225820db041db42f74864a66c7e6fe9d57ad590ac3cc26ca5de6c3e"
   }

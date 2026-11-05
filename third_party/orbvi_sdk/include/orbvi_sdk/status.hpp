@@ -14,12 +14,14 @@ enum class StreamId : std::uint16_t {
   LidarPointCloud = 4,
   LidarImu = 5,
   Disparity = 6,
-  VioPose = 7,
+  VioPose = 7,  // Deprecated mixed stream; legacy sessions/recordings only.
   PanoDisplay = 8,
   BevDisplay = 9,
   Bev = BevDisplay,
   FrameSync = 10,
   RegisteredCloud = 11,
+  PredictedPose = 12,
+  OptimizedPose = 13,
 };
 
 enum class FrameFormat : std::uint16_t {
@@ -33,7 +35,8 @@ enum class FrameFormat : std::uint16_t {
   LidarImuSample = 5,
   Disparity32F = 6,
   Disparity16UQ8 = 7,
-  VioPose = 8,
+  LocalizationPose = 8,
+  VioPose = LocalizationPose,  // Deprecated format alias for historical callers.
   PanoDisplayJpeg = 9,
   BevDisplayJpeg = 10,
   BevMjpeg = BevDisplayJpeg,
@@ -137,5 +140,8 @@ FrameFormat ExpectedFormatForStream(StreamId stream_id);
 bool IsAllowedFormatForStream(StreamId stream_id, FrameFormat format);
 bool IsImageStream(StreamId stream_id);
 bool IsImageFormat(FrameFormat format);
+inline bool IsPoseStream(StreamId stream) {
+  return stream == StreamId::PredictedPose || stream == StreamId::OptimizedPose;
+}
 
 }  // namespace orbvi_sdk

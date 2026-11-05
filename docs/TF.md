@@ -82,8 +82,8 @@ plane or installation transform from a frame name.
 
 | Parameter | Default | Effect |
 | --- | --- | --- |
-| `publish_vio_tf` | `true` | Publish optimized Odometry as dynamic TF. |
-| `publish_sensor_tf` | inherits `publish_vio_tf` | Publish calibrated static sensor branches. |
+| `publish_localization_tf` | `true` | Publish optimized Odometry as dynamic TF. |
+| `publish_sensor_tf` | inherits `publish_localization_tf` | Publish calibrated static sensor branches. |
 | `depth_pointcloud_frame_id` | empty (ROS_BODY: `orbvi_link`) | Name shared by the ROS_BODY cloud and its static TF; `base_link` restores legacy naming. |
 | `tf_mode` | `device` | `robot` converts IMU pose into robot pose and reparents static sensors. |
 | `mounting_config` | empty | URDF: frame names only (xyz/rpy rejected). Bridge: xyz/rpy required. Explicit robot ground plane for IPM/odom. |
@@ -92,9 +92,9 @@ plane or installation transform from a frame name.
 | `odom_frame` | `odom` | Parent frame for optional startup anchor. |
 
 All three bridge launch entrypoints forward these settings, in ROS1 and ROS2.
-For sensor-only operation, set `publish_vio_tf:=false publish_sensor_tf:=true`;
-static publication does not require the `vio` stream or a first pose. To disable
-all bridge TF, set `publish_vio_tf:=false`, leave `publish_sensor_tf` unspecified,
+For sensor-only operation, set `publish_localization_tf:=false publish_sensor_tf:=true`;
+static publication does not require the `localization` stream or a first pose. To disable
+all bridge TF, set `publish_localization_tf:=false`, leave `publish_sensor_tf` unspecified,
 and keep `publish_odom_tf:=false`. External URDF publication is independent.
 Only one bridge instance should own these edges in a ROS network.
 
@@ -149,8 +149,8 @@ old static anchor must not be reused across changed algorithm worlds.
 
 ## Tracking diagnostics and point-cloud comparison
 
-Omni-LIVO `OPTIMIZED` records go to `vio/odometry` and `vio/path`;
-`PROPAGATED` records go to `vio/imu_prediction`, including predictions marked
+Omni-LIVO `OPTIMIZED` records go to `localization/odometry` and `localization/path`;
+`PROPAGATED` records go to `localization/imu_prediction`, including predictions marked
 `DEGRADED`. Both ROS versions use the same routing. Prediction receipt does not
 mean tracking has recovered. Optimized records in `DEGRADED/recovering` remain
 available as Odometry, but do not advance optimized TF. The rejection
@@ -171,6 +171,10 @@ For alignment diagnostics, first compare `/orbvi/depth/points` with raw
 stream and `publish_lidar_pcl` to obtain the latter. This comparison uses only
 static calibration. The ordinary camera launch does not subscribe to LiDAR
 by default; a point cloud from another publisher is a different comparison.
+
+The optional `registered_cloud` SDK stream is forwarded as `/orbvi/cloud_registered`
+with XYZ, intensity and true image RGB, preserving its source timestamp and
+`camera_init` frame. The bridge does not transform or recolor these points.
 
 Omni-LIVO scan/map clouds are already expressed in `camera_init`. Comparing
 them with depth in that world additionally requires the optimized transform at

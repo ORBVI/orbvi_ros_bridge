@@ -10,9 +10,9 @@ same output, which is useful only when `streams` is overridden without `bev`:
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch \
-  streams:=raw,imu,vio publish_ipm:=true
+  streams:=raw,imu,localization publish_ipm:=true
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4v.launch.py \
-  streams:=raw,imu,vio publish_ipm:=true
+  streams:=raw,imu,localization publish_ipm:=true
 ```
 
 The Bridge first subscribes the board-generated `bev_display_stream` and only

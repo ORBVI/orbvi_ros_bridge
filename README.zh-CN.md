@@ -45,16 +45,17 @@ ROS1 和 ROS2 使用相同 topic 名称。ROS2 消息类型使用对应的 `::ms
 | `/orbvi/ipm/image` | `sensor_msgs/Image` | 优先发布板端 `bev_display_stream`（`1000x1000`、`bgr8`、目标 20 Hz）；仅板端明确不支持时才由 Host 派生 |
 | `/orbvi/imu` | `sensor_msgs/Imu` | 设备 IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 点云流 |
-| `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU 流 |
+| `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU；加速度 m/s²，角速度 rad/s |
 | `/orbvi/disparity` | `sensor_msgs/Image` | 视差图 |
 | `/orbvi/depth` | `sensor_msgs/Image` | 生成的深度图 |
 | `/orbvi/<front\|right\|rear\|left>/depth/viz` | `sensor_msgs/Image` | 四方向深度可视化图，可选叠加 5×5 米制深度网格 |
 | `/orbvi/depth/panorama` | `sensor_msgs/Image` | 由四路视差生成的 `32FC1` 球面距离图 |
 | `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | 全景深度可视化图 |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | 深度生成的点云 |
-| `/orbvi/vio/odometry` | `nav_msgs/Odometry` | 优化后的 VIO 位姿 |
-| `/orbvi/vio/path` | `nav_msgs/Path` | 由优化后的 VIO 位姿累计得到的有界轨迹 |
-| `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU 预测的 VIO 位姿 |
+| `/orbvi/cloud_registered` | `sensor_msgs/PointCloud2` | Omni-LIVO 注册彩色点云（世界系 XYZI + RGB，可选 4VL 数据流） |
+| `/orbvi/localization/odometry` | `nav_msgs/Odometry` | 优化后的融合位姿（VINS 或 Omni-LIVO） |
+| `/orbvi/localization/path` | `nav_msgs/Path` | 由优化后的融合位姿（VINS 或 Omni-LIVO）累计得到的有界轨迹 |
+| `/orbvi/localization/imu_prediction` | `nav_msgs/Odometry` | IMU 预测位姿（VINS 或 Omni-LIVO） |
 
 矫正图中的方位表示双目对的观察方向，不表示原始鱼眼相机本身。八路图像固定按
 `front/left、front/right、right/left、right/right、rear/left、rear/right、left/left、left/right`
@@ -140,8 +141,8 @@ source install/setup.bash
 
 | 设备 | ROS1 launch | ROS2 launch | 默认 `streams` |
 | --- | --- | --- | --- |
-| 4V（四目，无激光雷达） | `orbvi_ros_bridge_4v.launch` | `orbvi_ros_bridge_4v.launch.py` | `raw,rectified,pano,bev,imu,disparity,depth,vio` |
-| 4VL（四目，带激光雷达） | `orbvi_ros_bridge_4vl.launch` | `orbvi_ros_bridge_4vl.launch.py` | `raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio` |
+| 4V（四目，无激光雷达） | `orbvi_ros_bridge_4v.launch` | `orbvi_ros_bridge_4v.launch.py` | `raw,rectified,pano,bev,imu,disparity,depth,localization` |
+| 4VL（四目，带激光雷达） | `orbvi_ros_bridge_4vl.launch` | `orbvi_ros_bridge_4vl.launch.py` | `raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,localization,registered_cloud` |
 
 4V：
 
@@ -158,7 +159,7 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py
 ```
 
 首要检查的 topic：`/orbvi/raw/camera_<id>/image`、`/orbvi/depth`、
-`/orbvi/vio/odometry`、`/orbvi/pano/image`、`/orbvi/ipm/image`；4VL 另有
+`/orbvi/localization/odometry`、`/orbvi/pano/image`、`/orbvi/ipm/image`；4VL 另有
 `/orbvi/lidar/custom` 和 `/orbvi/lidar/imu`。
 
 新固件的全景和 BEV 均由板端生成，主机只做解码发布；仅旧固件明确返回不支持时
@@ -166,7 +167,7 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch \
-  streams:=raw,rectified,imu,disparity,depth,vio
+  streams:=raw,rectified,imu,disparity,depth,localization
 ```
 
 ## 文档

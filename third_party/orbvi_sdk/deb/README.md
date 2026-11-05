@@ -143,13 +143,13 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py
 在另一个已加载相同工作空间的 ROS2 终端检查收流：
 
 ```bash
-ros2 topic hz /orbvi/vio/odometry
+ros2 topic hz /orbvi/localization/odometry
 ros2 topic hz /orbvi/depth/points
 ros2 topic echo /tf_static --qos-durability transient_local --qos-reliability reliable --once
 ```
 
 前两条命令观察数秒后按 Ctrl+C，再执行下一条。ROS1 可分别使用
-`rostopic hz /orbvi/vio/odometry`、`rostopic hz /orbvi/depth/points`、
+`rostopic hz /orbvi/localization/odometry`、`rostopic hz /orbvi/depth/points`、
 `rostopic echo -n 1 /tf_static`。
 
 ## 回滚与验证范围

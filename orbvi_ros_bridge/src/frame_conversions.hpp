@@ -107,8 +107,13 @@ bool MakeDepthPointCloud(
 bool MakePointCloudMessage(
     const orbvi_sdk::PointCloud& cloud,
     sensor_msgs::PointCloud2* out);
-bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::Imu* out);
+// LiDAR IMU requires its public SDK unit parameters; timestamps/gyro stay unchanged.
+bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::Imu* out,
+                    const orbvi_sdk::LidarImuParameters* lidar_parameters = nullptr);
 std::string VioTopicSuffix(const orbvi_sdk::FrameView& frame);
+bool MakeRegisteredCloudMessage(
+    const orbvi_sdk::FrameView& frame,
+    sensor_msgs::PointCloud2* out);
 bool MakeLivoxCustomMessage(
     const orbvi_sdk::FrameView& frame,
     livox_ros_driver2::CustomMsg* out);

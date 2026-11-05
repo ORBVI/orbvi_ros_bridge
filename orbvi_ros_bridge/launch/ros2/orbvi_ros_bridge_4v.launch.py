@@ -9,7 +9,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 ARGUMENT_DEFAULTS = {
     "host": "192.168.3.100",
-    "streams": "raw,rectified,pano,bev,imu,disparity,depth,vio",
+    "streams": "raw,rectified,pano,bev,imu,disparity,depth,localization",
     "publish_lidar_pcl": "false",
     "sensor_data_best_effort": "false",
     "ipm_extent_m": "10.0",
@@ -18,20 +18,20 @@ ARGUMENT_DEFAULTS = {
     "ipm_frame_id": "",
     "publish_ipm": "false",
     "depth_viz_show_grid_values": "false",
-    "publish_vio_path": "true",
-    "publish_vio_tf": "true",
+    "publish_localization_path": "true",
+    "publish_localization_tf": "true",
     "depth_pointcloud_frame_id": "",
     "tf_mode": "device",
     "mounting_config": "",
     "publish_mounting_tf": "false",
     "publish_odom_tf": "false",
     "odom_frame": "odom",
-    "vio_path_max_poses": "2000",
-    "vio_path_publish_rate_hz": "10.0",
+    "localization_path_max_poses": "2000",
+    "localization_path_publish_rate_hz": "10.0",
 }
 
 DEFAULT_BRIDGE_PARAMETERS = {
-    "streams": "raw,rectified,pano,bev,imu,disparity,depth,vio",
+    "streams": "raw,rectified,pano,bev,imu,disparity,depth,localization",
 }
 
 
@@ -58,7 +58,7 @@ def generate_launch_description():
     parameters["publish_ipm"] = LaunchConfiguration("publish_ipm")
     parameters["depth_viz_show_grid_values"] = LaunchConfiguration(
         "depth_viz_show_grid_values")
-    parameters["publish_vio_path"] = LaunchConfiguration("publish_vio_path")
+    parameters["publish_localization_path"] = LaunchConfiguration("publish_localization_path")
     parameters["depth_pointcloud_frame_id"] = ParameterValue(
         LaunchConfiguration("depth_pointcloud_frame_id"), value_type=str)
     parameters["tf_mode"] = ParameterValue(LaunchConfiguration("tf_mode"), value_type=str)
@@ -66,11 +66,11 @@ def generate_launch_description():
     parameters["publish_mounting_tf"] = LaunchConfiguration("publish_mounting_tf")
     parameters["publish_odom_tf"] = LaunchConfiguration("publish_odom_tf")
     parameters["odom_frame"] = ParameterValue(LaunchConfiguration("odom_frame"), value_type=str)
-    parameters["publish_vio_tf"] = LaunchConfiguration("publish_vio_tf")
+    parameters["publish_localization_tf"] = LaunchConfiguration("publish_localization_tf")
     parameters["publish_sensor_tf"] = LaunchConfiguration("publish_sensor_tf")
-    parameters["vio_path_max_poses"] = LaunchConfiguration("vio_path_max_poses")
-    parameters["vio_path_publish_rate_hz"] = LaunchConfiguration(
-        "vio_path_publish_rate_hz")
+    parameters["localization_path_max_poses"] = LaunchConfiguration("localization_path_max_poses")
+    parameters["localization_path_publish_rate_hz"] = LaunchConfiguration(
+        "localization_path_publish_rate_hz")
     return LaunchDescription([
         DeclareLaunchArgument("ipm_extent_m", default_value=ARGUMENT_DEFAULTS["ipm_extent_m"]),
         DeclareLaunchArgument("ipm_resolution_m_per_pixel", default_value=ARGUMENT_DEFAULTS["ipm_resolution_m_per_pixel"]),
@@ -89,11 +89,11 @@ def generate_launch_description():
             default_value=ARGUMENT_DEFAULTS["depth_pointcloud_frame_id"],
             description="ROS_BODY device frame; empty uses orbvi_link; base_link restores legacy naming"),
         DeclareLaunchArgument(
-            "publish_vio_tf",
-            default_value=ARGUMENT_DEFAULTS["publish_vio_tf"]),
+            "publish_localization_tf",
+            default_value=ARGUMENT_DEFAULTS["publish_localization_tf"]),
         DeclareLaunchArgument(
             "publish_sensor_tf",
-            default_value=LaunchConfiguration("publish_vio_tf")),
+            default_value=LaunchConfiguration("publish_localization_tf")),
         DeclareLaunchArgument(
             "sensor_data_best_effort",
             default_value=ARGUMENT_DEFAULTS["sensor_data_best_effort"]),
@@ -109,14 +109,14 @@ def generate_launch_description():
             "depth_viz_show_grid_values",
             default_value=ARGUMENT_DEFAULTS["depth_viz_show_grid_values"]),
         DeclareLaunchArgument(
-            "publish_vio_path",
-            default_value=ARGUMENT_DEFAULTS["publish_vio_path"]),
+            "publish_localization_path",
+            default_value=ARGUMENT_DEFAULTS["publish_localization_path"]),
         DeclareLaunchArgument(
-            "vio_path_max_poses",
-            default_value=ARGUMENT_DEFAULTS["vio_path_max_poses"]),
+            "localization_path_max_poses",
+            default_value=ARGUMENT_DEFAULTS["localization_path_max_poses"]),
         DeclareLaunchArgument(
-            "vio_path_publish_rate_hz",
-            default_value=ARGUMENT_DEFAULTS["vio_path_publish_rate_hz"]),
+            "localization_path_publish_rate_hz",
+            default_value=ARGUMENT_DEFAULTS["localization_path_publish_rate_hz"]),
         SetEnvironmentVariable(
             name="RMW_IMPLEMENTATION",
             value=EnvironmentVariable("RMW_IMPLEMENTATION", default_value="rmw_fastrtps_cpp")),

@@ -48,16 +48,17 @@ for calibration and diagnostics and does not select the topic.
 | `/orbvi/ipm/image` | `sensor_msgs/Image` | Board `bev_display_stream` ground-plane BEV (`1000x1000`, `bgr8`, target 20 Hz), with Host derivation only when the board explicitly reports the stream unsupported |
 | `/orbvi/imu` | `sensor_msgs/Imu` | Device IMU |
 | `/orbvi/lidar/custom` | `livox_ros_driver2/CustomMsg` | MID360 point cloud stream |
-| `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU stream |
+| `/orbvi/lidar/imu` | `sensor_msgs/Imu` | MID360 IMU; acceleration m/s², angular velocity rad/s |
 | `/orbvi/disparity` | `sensor_msgs/Image` | Disparity image |
 | `/orbvi/depth` | `sensor_msgs/Image` | Generated depth image |
 | `/orbvi/<front\|right\|rear\|left>/depth/viz` | `sensor_msgs/Image` | Directional depth visualization; optionally includes a 5x5 metric grid |
 | `/orbvi/depth/panorama` | `sensor_msgs/Image` | `32FC1` spherical range generated after transforming all four stereo depth tiles by their full rig poses (rotation and translation) |
 | `/orbvi/depth/panorama/viz` | `sensor_msgs/Image` | Depth-panorama visualization |
 | `/orbvi/depth/points` | `sensor_msgs/PointCloud2` | Depth-derived point cloud; the default `ros` output frame applies each stereo pair's full rig pose |
-| `/orbvi/vio/odometry` | `nav_msgs/Odometry` | Optimized VIO pose |
-| `/orbvi/vio/path` | `nav_msgs/Path` | Bounded trajectory accumulated from optimized VIO poses |
-| `/orbvi/vio/imu_prediction` | `nav_msgs/Odometry` | IMU-propagated VIO pose |
+| `/orbvi/cloud_registered` | `sensor_msgs/PointCloud2` | Omni-LIVO registered world-frame XYZI + RGB cloud; optional 4VL stream |
+| `/orbvi/localization/odometry` | `nav_msgs/Odometry` | Optimized fused pose (VINS or Omni-LIVO) |
+| `/orbvi/localization/path` | `nav_msgs/Path` | Bounded trajectory accumulated from optimized fused poses |
+| `/orbvi/localization/imu_prediction` | `nav_msgs/Odometry` | IMU-propagated pose (VINS or Omni-LIVO) |
 
 The rectified direction names the stereo pair's viewing direction, not the
 physical source fisheye. Images are published in the fixed order
@@ -145,8 +146,8 @@ address, append `host:=<device-ip>` to the commands below.
 
 | Device | ROS1 launch | ROS2 launch | Default `streams` |
 | --- | --- | --- | --- |
-| 4V (four cameras, no LiDAR) | `orbvi_ros_bridge_4v.launch` | `orbvi_ros_bridge_4v.launch.py` | `raw,rectified,pano,bev,imu,disparity,depth,vio` |
-| 4VL (four cameras with LiDAR) | `orbvi_ros_bridge_4vl.launch` | `orbvi_ros_bridge_4vl.launch.py` | `raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio` |
+| 4V (four cameras, no LiDAR) | `orbvi_ros_bridge_4v.launch` | `orbvi_ros_bridge_4v.launch.py` | `raw,rectified,pano,bev,imu,disparity,depth,localization` |
+| 4VL (four cameras with LiDAR) | `orbvi_ros_bridge_4vl.launch` | `orbvi_ros_bridge_4vl.launch.py` | `raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,localization,registered_cloud` |
 
 4V:
 
@@ -163,7 +164,7 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py
 ```
 
 First topics to check: `/orbvi/raw/camera_<id>/image`, `/orbvi/depth`,
-`/orbvi/vio/odometry`, `/orbvi/pano/image` and `/orbvi/ipm/image`. 4VL also
+`/orbvi/localization/odometry`, `/orbvi/pano/image` and `/orbvi/ipm/image`. 4VL also
 publishes `/orbvi/lidar/custom` and `/orbvi/lidar/imu`.
 
 Current firmware generates panorama and BEV on the board; the host only decodes
@@ -173,7 +174,7 @@ reports a stream as unsupported. If you do not need them, remove `pano,bev` from
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch \
-  streams:=raw,rectified,imu,disparity,depth,vio
+  streams:=raw,rectified,imu,disparity,depth,localization
 ```
 
 ## Documentation

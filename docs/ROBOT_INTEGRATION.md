@@ -38,7 +38,7 @@ SDK 提供内部标定，bridge 将其封装为 ROS 静态 TF。机器人 URDF �
 `base_link → orbvi_link`，bridge 的 `publish_mounting_tf` 默认关闭。
 没有 URDF 时，显式开启该开关由 bridge 发布安装边；不得让两者同时发布这条边。
 独立定位/融合节点若已拥有 `camera_init → base_link`，关闭 bridge 的
-`publish_vio_tf`，由集成方处理世界系关系。
+`publish_localization_tf`，由集成方处理世界系关系。
 
 机器人模式将传感器静态边重挂到设备参考系，并保留 `mid360_imu → aft_mapped`
 的单位变换作为原 IMU frame 的别名，不再广播旧的动态 `camera_init → aft_mapped`。
@@ -171,7 +171,7 @@ T_world_base = T_world_imu * inverse(T_base_mid360_imu)
 IPM 同样从该 buffer 查询 `T_base_camera`；URDF 模式不再读取任何安装 xyz/rpy。
 bridge 模式将自己发布的安装边放入同一 buffer，二者共用同一个冻结快照。
 保留原采样时间、优化位姿合法性和序列门控，不以接收时间代替采样时间。
-原 `/orbvi/vio/odometry` 和 `/orbvi/vio/path` 保留 IMU 数据契约；其速度和协方差
+原 `/orbvi/localization/odometry` 和 `/orbvi/localization/path` 保留 IMU 数据契约；其速度和协方差
 未转换到机器人参考点。需要机器人位姿可查询 `camera_init → base_link`。
 
 没有有效的设备—IMU 标定时，停止机器人动态 TF，保留原 Odometry 和独立有效
@@ -185,7 +185,7 @@ bridge 模式将自己发布的安装边放入同一 buffer，二者共用同一
 当前 native 的 `camera_init` 已做重力对齐，但原点在初始化 IMU 参考点，yaw 也
 不保证是机器人前方。默认不改变此行为；需要启动 footprint 归零和初始机器人
 航向归零时启用 `publish_odom_tf:=true odom_frame:=odom`。必须同时使用
-`tf_mode:=robot publish_vio_tf:=true`，并提供机器人系下的 ground_plane。
+`tf_mode:=robot publish_localization_tf:=true`，并提供机器人系下的 ground_plane。
 
 ```text
 odom → camera_init → base_link → orbvi_link → sensors

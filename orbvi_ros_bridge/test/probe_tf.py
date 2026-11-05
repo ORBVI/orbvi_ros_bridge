@@ -108,7 +108,7 @@ def main():
         node = rclpy.create_node('orbvi_tf_acceptance')
         def subscribe(topic, typ, cb):
             qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE)
-            if args.sensor_reader_best_effort and topic not in ('/tf', '/tf_static', '/orbvi/vio/odometry'):
+            if args.sensor_reader_best_effort and topic not in ('/tf', '/tf_static', '/orbvi/localization/odometry'):
                 qos.reliability = ReliabilityPolicy.BEST_EFFORT
             if topic == '/tf_static':
                 qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
@@ -202,7 +202,7 @@ def main():
         counts['lidar_imu'] += 1
         imu_frames.add(message.header.frame_id)
     subs = [subscribe('/tf', TFMessage, tf), subscribe('/tf_static', TFMessage, tf_static),
-            subscribe('/orbvi/vio/odometry', Odometry, odometry),
+            subscribe('/orbvi/localization/odometry', Odometry, odometry),
             subscribe('/orbvi/lidar/imu', Imu, imu)]
     for camera_id in (3,2,4,5):
         subs.append(subscribe('/orbvi/raw/camera_%d/image/compressed' % camera_id, CompressedImage, image))
@@ -218,10 +218,10 @@ def main():
     if args.include_depth:
         streams += ',disparity,depth'
     params = dict(host=args.host, control_port=args.control_port, streams=streams,
-                  publish_vio_tf=dynamic, publish_sensor_tf=static,
+                  publish_localization_tf=dynamic, publish_sensor_tf=static,
                   publish_decoded_images=False, publish_depth_pointcloud=args.include_depth,
                   publish_depth_viz=False, publish_depth_panorama=False,
-                  publish_vio_path=False)
+                  publish_localization_path=False)
     if mounting:
         params.update(tf_mode='robot',mounting_config=args.mounting_config,
                       publish_mounting_tf=args.publish_mounting_tf,publish_odom_tf=args.publish_odom_tf)

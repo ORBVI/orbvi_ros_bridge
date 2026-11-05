@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,6 +16,7 @@
 #include <tf2/LinearMath/Transform.h>
 
 #include "frame_conversions_ros2.hpp"
+#include "localization_streams.hpp"
 #include "orbvi_sdk/client.hpp"
 #include "panorama_options.hpp"
 
@@ -24,6 +26,22 @@ void AppendFloat32(std::vector<std::uint8_t>* out, float value) {
   std::uint8_t bytes[sizeof(float)] = {};
   std::memcpy(bytes, &value, sizeof(value));
   out->insert(out->end(), bytes, bytes + sizeof(bytes));
+}
+
+orbvi_sdk::OwnedFrame RegisteredCloudFixture() {
+  orbvi_sdk::OwnedFrame frame;
+  frame.header.stream_id = orbvi_sdk::StreamId::RegisteredCloud;
+  frame.header.format = orbvi_sdk::FrameFormat::RegisteredPointXyziRgb;
+  frame.header.timestamp_ns = 1700000000123456789ULL;
+  frame.frame_id = "camera_init";
+  frame.metadata["timestamp_domain"] = "realtime";
+  frame.payload = {0x4f, 0x4c, 0x50, 0x43, 1, 0, 20, 0, 2, 0, 0, 0};
+  for (int i = 0; i < 2; ++i) {
+    for (float value : {1.25f + i, -2.5f, 3.75f, 42.0f})
+      AppendFloat32(&frame.payload, value);
+    frame.payload.insert(frame.payload.end(), {17, 63, 211, 0});
+  }
+  return frame;
 }
 
 bool Contains(const std::string& value, const std::string& needle) {
@@ -556,6 +574,16 @@ TEST(OrbviRosBridgeCompressedImages, InvalidSingleRectifiedFrameDoesNotPublishIn
   EXPECT_TRUE(outputs.empty());
 }
 
+TEST(OrbviRosBridgeVio, RoutesSplitPoseStreamsWithoutLegacySourceTags) {
+  orbvi_sdk::OwnedFrame frame;
+  frame.header.format = orbvi_sdk::FrameFormat::LocalizationPose;
+  frame.frame_id = "camera_init";
+  frame.header.stream_id = orbvi_sdk::StreamId::OptimizedPose;
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "localization/odometry");
+  frame.header.stream_id = orbvi_sdk::StreamId::PredictedPose;
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "localization/imu_prediction");
+}
+
 TEST(OrbviRosBridgeVio, RoutesOptimizedAndPropagatedSourcesToSeparateTopics) {
   orbvi_sdk::OwnedFrame frame;
   frame.header.stream_id = orbvi_sdk::StreamId::VioPose;
@@ -564,10 +592,10 @@ TEST(OrbviRosBridgeVio, RoutesOptimizedAndPropagatedSourcesToSeparateTopics) {
   frame.frame_id = "orbvi/vio_pose_stream";
 
   frame.metadata["vio_source"] = "optimized";
-  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/odometry");
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "localization/odometry");
 
   frame.metadata["vio_source"] = "propagated";
-  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/imu_prediction");
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "localization/imu_prediction");
 
   frame.metadata["vio_source"] = "unknown";
   EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
@@ -580,12 +608,12 @@ TEST(OrbviRosBridgeVio, RoutesNativeOmniLivoOptimizedAndDegradedPredictionWithou
   frame.frame_id = "camera_init";
   frame.metadata["localization_source"] = "omni_livo";
   frame.metadata["pose_kind"] = "OPTIMIZED";
-  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/odometry");
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "localization/odometry");
 
   frame.metadata["pose_kind"] = "PROPAGATED";
   frame.metadata["tracking_state"] = "DEGRADED";
   frame.metadata["tracking_reason"] = "frame_cost_increased";
-  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "vio/imu_prediction");
+  EXPECT_EQ(orbvi_ros_bridge::VioTopicSuffix(frame.view()), "localization/imu_prediction");
   frame.metadata["pose_kind"] = "unknown";
   EXPECT_TRUE(orbvi_ros_bridge::VioTopicSuffix(frame.view()).empty());
   frame.metadata["pose_kind"] = "OPTIMIZED";
@@ -911,20 +939,58 @@ TEST(OrbviRosBridgeLivox, CustomMessageMapsToRosPointCloud2) {
   EXPECT_FLOAT_EQ(*iter_intensity, 42.0f);
 }
 
-TEST(OrbviRosBridgeFrameIdentity, LidarImuUsesImuAxesWithoutChangingPayload) {
+TEST(OrbviRosBridgeFrameIdentity, LidarImuUsesImuAxesAndRosAccelerationUnits) {
   orbvi_sdk::OwnedFrame frame;
-  frame.header.stream_id=orbvi_sdk::StreamId::LidarImu;
-  frame.header.timestamp_ns=123456789;
-  frame.frame_id="livox_frame";
-  const std::array<double,37> payload{{0,0,0,1,1,2,3,4,5,6}};
-  frame.payload.resize(sizeof(payload));std::memcpy(frame.payload.data(),payload.data(),sizeof(payload));
+  frame.header.stream_id = orbvi_sdk::StreamId::LidarImu;
+  frame.header.timestamp_ns = 1700000000000000123ULL;
+  frame.frame_id = "livox_frame";
+  std::array<double, 37> payload{{0, 0, 0, 1, 1, 2, 3, .1, -.2, 1}};
+  // Last nine doubles hold the acceleration covariance (including off-diagonals).
+  for (int i = 0; i < 9; ++i) payload[28+i] = (i+1)*.01;
+  frame.payload.resize(sizeof(payload));
+  std::memcpy(frame.payload.data(), payload.data(), sizeof(payload));
   sensor_msgs::msg::Imu message;
-  ASSERT_TRUE(orbvi_ros_bridge::MakeImuMessage(frame.view(),&message));
-  EXPECT_EQ(message.header.frame_id,"mid360_imu");
-  EXPECT_EQ(message.angular_velocity.x,1);EXPECT_EQ(message.linear_acceleration.z,6);
-  frame.header.stream_id=orbvi_sdk::StreamId::Imu;
-  ASSERT_TRUE(orbvi_ros_bridge::MakeImuMessage(frame.view(),&message));
-  EXPECT_EQ(message.header.frame_id,"livox_frame");
+  orbvi_sdk::LidarImuParameters parameters;
+  EXPECT_FALSE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message));
+  EXPECT_FALSE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message, &parameters));
+  parameters.linear_acceleration_unit = orbvi_sdk::LinearAccelerationUnit::StandardGravity;
+  parameters.linear_acceleration_scale_to_mps2 = 9.80665;
+  ASSERT_TRUE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message, &parameters));
+  EXPECT_EQ(message.header.frame_id, "mid360_imu");
+  EXPECT_EQ(message.header.stamp.sec, 1700000000);
+  EXPECT_EQ(message.header.stamp.nanosec, 123u);
+  EXPECT_DOUBLE_EQ(message.angular_velocity.x, 1);
+  EXPECT_DOUBLE_EQ(message.angular_velocity.y, 2);
+  EXPECT_DOUBLE_EQ(message.angular_velocity.z, 3);
+  EXPECT_DOUBLE_EQ(message.orientation.w, 1);
+  EXPECT_DOUBLE_EQ(message.linear_acceleration.x, .1 * 9.80665);
+  EXPECT_DOUBLE_EQ(message.linear_acceleration.y, -.2 * 9.80665);
+  EXPECT_DOUBLE_EQ(message.linear_acceleration.z, 9.80665);
+  for (int i = 0; i < 9; ++i)
+    EXPECT_NEAR(message.linear_acceleration_covariance[i], payload[28+i]*9.80665*9.80665, 1e-12);
+  EXPECT_DOUBLE_EQ(message.angular_velocity_covariance[0], 0);
+  // The SDK input remains in its advertised unit.
+  EXPECT_EQ(std::memcmp(frame.payload.data(), payload.data(), sizeof(payload)), 0);
+  parameters.linear_acceleration_unit = orbvi_sdk::LinearAccelerationUnit::MetersPerSecondSquared;
+  parameters.linear_acceleration_scale_to_mps2 = 1;
+  ASSERT_TRUE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message, &parameters));
+  EXPECT_DOUBLE_EQ(message.linear_acceleration.z, 1);
+  // A missing covariance marker must remain -1, not be scaled.
+  payload[28] = -1;
+  std::memcpy(frame.payload.data(), payload.data(), sizeof(payload));
+  parameters.linear_acceleration_unit = orbvi_sdk::LinearAccelerationUnit::StandardGravity;
+  parameters.linear_acceleration_scale_to_mps2 = 9.80665;
+  ASSERT_TRUE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message, &parameters));
+  EXPECT_DOUBLE_EQ(message.linear_acceleration_covariance[0], -1);
+  EXPECT_DOUBLE_EQ(message.linear_acceleration_covariance[1], payload[29]);
+  parameters.linear_acceleration_scale_to_mps2 = -1;
+  EXPECT_FALSE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message, &parameters));
+  parameters.linear_acceleration_scale_to_mps2 = std::numeric_limits<double>::infinity();
+  EXPECT_FALSE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message, &parameters));
+  frame.header.stream_id = orbvi_sdk::StreamId::Imu;
+  ASSERT_TRUE(orbvi_ros_bridge::MakeImuMessage(frame.view(), &message, &parameters));
+  EXPECT_EQ(message.header.frame_id, "livox_frame");
+  EXPECT_DOUBLE_EQ(message.linear_acceleration.z, 1); // Main IMU is already SI.
 }
 
 TEST(OrbviRosBridgeRobotTf, PreservesSourceStampAndOriginalImuOdometry) {
@@ -948,4 +1014,77 @@ TEST(OrbviRosBridgeRobotTf, PreservesSourceStampAndOriginalImuOdometry) {
   EXPECT_NEAR(transform.transform.translation.z,30,1e-12);
   EXPECT_EQ(odometry.child_frame_id,"aft_mapped");
   EXPECT_EQ(odometry.pose.pose.position.y,20);
+}
+
+TEST(OrbviRosBridgeRegisteredCloud, PreservesWorldGeometryColorIntensityAndTime) {
+  auto frame = RegisteredCloudFixture();
+  sensor_msgs::msg::PointCloud2 message;
+  ASSERT_TRUE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  EXPECT_EQ(message.header.frame_id, "camera_init");
+  EXPECT_EQ(message.header.stamp.sec, 1700000000);
+  EXPECT_EQ(message.header.stamp.nanosec, 123456789u);
+  EXPECT_EQ(message.width, 2u);
+  EXPECT_EQ(message.height, 1u);
+  EXPECT_EQ(message.point_step, 20u);
+  EXPECT_EQ(message.row_step, 40u);
+  EXPECT_TRUE(message.is_dense);
+  ASSERT_EQ(message.fields.size(), 5u);
+  EXPECT_EQ(message.fields[4].name, "rgb");
+  sensor_msgs::PointCloud2ConstIterator<float> x(message, "x"), y(message, "y"),
+      z(message, "z"), intensity(message, "intensity");
+  sensor_msgs::PointCloud2ConstIterator<std::uint8_t> r(message, "r"),
+      g(message, "g"), b(message, "b");
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_FLOAT_EQ(*x, 1.25f + i);
+    EXPECT_FLOAT_EQ(*y, -2.5f);
+    EXPECT_FLOAT_EQ(*z, 3.75f);
+    EXPECT_FLOAT_EQ(*intensity, 42.0f);
+    EXPECT_EQ(*r, 17u); EXPECT_EQ(*g, 63u); EXPECT_EQ(*b, 211u);
+    ++x; ++y; ++z; ++intensity; ++r; ++g; ++b;
+  }
+}
+
+TEST(OrbviRosBridgeRegisteredCloud, RejectsInvalidWireDataWithoutChangingOutput) {
+  const auto valid = RegisteredCloudFixture();
+  sensor_msgs::msg::PointCloud2 message;
+  message.header.frame_id = "unchanged";
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(valid.view(), nullptr));
+  auto frame = valid;
+  frame.payload.pop_back();
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  frame = valid; frame.frame_id = "livox_frame";
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  frame = valid; frame.metadata["timestamp_domain"] = "monotonic";
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  frame = valid; frame.header.compression = orbvi_sdk::Compression::Jpeg;
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  frame = valid; frame.header.stream_id = orbvi_sdk::StreamId::LidarPointCloud;
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  frame = valid; frame.header.timestamp_ns = std::numeric_limits<std::uint64_t>::max();
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  frame = valid; frame.payload[8] = 3;  // Count exceeds the actual payload.
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  frame = valid;
+  const float invalid = std::numeric_limits<float>::quiet_NaN();
+  std::memcpy(frame.payload.data() + 12, &invalid, sizeof(invalid));
+  EXPECT_FALSE(orbvi_ros_bridge::MakeRegisteredCloudMessage(frame.view(), &message));
+  EXPECT_EQ(message.header.frame_id, "unchanged");
+}
+
+TEST(OrbviRosBridgeVio, AcceptsLocalizationAndLegacyVioStreamNames) {
+  const std::vector<orbvi_sdk::StreamId> expected = {
+      orbvi_sdk::StreamId::OptimizedPose, orbvi_sdk::StreamId::PredictedPose};
+  for (const auto* token : {"localization", "vio", "vio_pose_stream"}) {
+    orbvi_sdk::StreamId stream = orbvi_sdk::StreamId::Unknown;
+    EXPECT_TRUE(orbvi_ros_bridge::ParseBridgeStream(token, &stream));
+    EXPECT_EQ(orbvi_ros_bridge::ResolveLocalizationStreams({stream}), expected);
+  }
+}
+
+TEST(OrbviRosBridgeRegisteredCloud, AcceptsShortAndSdkStreamNames) {
+  for (const auto* token : {"registered_cloud", "registered_cloud_stream"}) {
+    orbvi_sdk::StreamId stream = orbvi_sdk::StreamId::Unknown;
+    EXPECT_TRUE(orbvi_ros_bridge::ParseBridgeStream(token, &stream));
+    EXPECT_EQ(stream, orbvi_sdk::StreamId::RegisteredCloud);
+  }
 }

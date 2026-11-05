@@ -187,6 +187,23 @@ ros2 topic echo /tf_static --qos-durability transient_local --qos-reliability re
 `rostopic echo -n 1 /tf_static`。若 `/orbvi/localization/odometry` 没有数据，
 优先确认第 3 节的板端版本是否已是 `b580d06d`。
 
+## 5. 主机：打开 RViz 可视化
+
+bridge 保持运行，**另开一个终端**并加载相同工作空间（同第 4 节的两条 `source`），然后执行：
+
+```bash
+# ROS1
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch profile:=mid360       # 4VL
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch profile:=visual       # 4V
+# ROS2
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py profile:=mid360  # 4VL
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py profile:=visual  # 4V
+```
+
+`mid360` 以 `camera_init` 为固定坐标系，显示累积彩色点云和定位轨迹；`visual` 以
+`orbvi_link` 为固定坐标系，显示实时深度点云，不依赖定位。RViz 提示 Fixed Frame
+不存在时改用 `profile:=visual`。详见[查看数据](../../../docs/VIEWING.zh-CN.md)。
+
 ## 回滚与验证范围
 
 回滚时在板端重新安装提前保存的、与设备配套的旧版 deb，确认安装成功后重启，

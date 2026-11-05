@@ -2,9 +2,12 @@
 
 [English](README.md)
 
-首次使用随仓库提供的 4VL 板端 deb，请阅读
-[安装与使用说明](third_party/orbvi_sdk/deb/README.md)：包含校验、板端安装、
-版本检查、主机 bridge 启动和回滚方法。
+> **升级提示：** 当前版本 bridge 必须配合仓库内置的板端 runtime
+> `orbvi-runtime 20261105.1+gb580d06d2208`（4V、4VL 各一个包）使用。新增的定位、
+> Omni-LIVO 彩色点云、SI 单位 IMU 和校正 JPEG 数据流依赖配套板端；旧版板端
+> （例如 `2026.10.21+dev.db44d767`）可能缺少 topic。请先升级板端，再清理并重新编译
+> bridge。具体步骤见[安装与使用说明](third_party/orbvi_sdk/deb/README.md)：
+> 包含型号选择、校验、板端安装、版本检查、主机 bridge 启动和回滚方法。
 
 ORBVI ROS Bridge 通过 ORBVI Host SDK 将 ORBVI 设备数据发布到 ROS1 或 ROS2。
 它面向需要在 Linux 主机上获取相机、IMU、MID360 LiDAR、视差、Host 侧深度、

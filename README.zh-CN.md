@@ -7,7 +7,7 @@
 > Omni-LIVO 彩色点云、SI 单位 IMU 和校正 JPEG 数据流依赖配套板端；旧版板端
 > （例如 `2026.10.21+dev.db44d767`）可能缺少 topic。请先升级板端，再清理并重新编译
 > bridge。具体步骤见[安装与使用说明](third_party/orbvi_sdk/deb/README.md)：
-> 包含型号选择、校验、板端安装、版本检查、主机 bridge 启动和回滚方法。
+> 包含型号选择、校验、板端安装、版本检查、主机 bridge 启动、RViz 查看和回滚方法。
 
 ORBVI ROS Bridge 通过 ORBVI Host SDK 将 ORBVI 设备数据发布到 ROS1 或 ROS2。
 它面向需要在 Linux 主机上获取相机、IMU、MID360 LiDAR、视差、Host 侧深度、
@@ -172,6 +172,31 @@ ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4vl.launch.py
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch \
   streams:=raw,rectified,imu,disparity,depth,localization
 ```
+
+## 打开 RViz 可视化
+
+bridge 启动后保持运行，**另开一个终端**，加载同一个工作空间后启动 RViz：
+
+```bash
+# ROS1
+source /opt/ros/noetic/setup.bash && source devel/setup.bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch profile:=mid360   # 4VL
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch profile:=visual   # 4V
+
+# ROS2
+source /opt/ros/${ROS_DISTRO}/setup.bash && source install/setup.bash
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py profile:=mid360   # 4VL
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py profile:=visual   # 4V
+```
+
+| `profile` | 适用设备 | Fixed Frame | 显示内容 |
+| --- | --- | --- | --- |
+| `mid360`（默认） | 4VL | `camera_init` | 累积彩色注册点云 `/orbvi/cloud_registered`、定位轨迹、四路相机 |
+| `visual` | 4V，或 4VL 尚无定位 TF 时 | `orbvi_link` | 实时彩色深度点云 `/orbvi/depth/points`、四路相机 |
+
+RViz 打开后一片空白时，先确认 bridge 终端没有报错，再看 RViz 左侧 `Global Status`
+是否提示 Fixed Frame 不存在；这种情况换成 `profile:=visual`。查看 topic 频率和图像可用
+`orbvi_ros_bridge_rqt.launch`（ROS2 为 `.launch.py`）。更多显示项说明见[查看数据](docs/VIEWING.zh-CN.md)。
 
 ## 文档
 

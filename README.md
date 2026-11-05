@@ -181,6 +181,33 @@ roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch \
   streams:=raw,rectified,imu,disparity,depth,localization
 ```
 
+## Open RViz
+
+Keep the bridge running. **Open a second terminal**, source the same workspace,
+and start RViz:
+
+```bash
+# ROS1
+source /opt/ros/noetic/setup.bash && source devel/setup.bash
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch profile:=mid360   # 4VL
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch profile:=visual   # 4V
+
+# ROS2
+source /opt/ros/${ROS_DISTRO}/setup.bash && source install/setup.bash
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py profile:=mid360   # 4VL
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py profile:=visual   # 4V
+```
+
+| `profile` | Device | Fixed Frame | Shows |
+| --- | --- | --- | --- |
+| `mid360` (default) | 4VL | `camera_init` | Accumulated registered RGB cloud `/orbvi/cloud_registered`, localization path, four cameras |
+| `visual` | 4V, or 4VL before localization TF is available | `orbvi_link` | Live RGB depth cloud `/orbvi/depth/points`, four cameras |
+
+If RViz stays empty, first check the bridge terminal for errors, then check
+whether RViz `Global Status` reports a missing Fixed Frame; if so, switch to
+`profile:=visual`. For topic rates and images use `orbvi_ros_bridge_rqt.launch`
+(`.launch.py` on ROS2). Display details are in [View Data](docs/VIEWING.md).
+
 ## Documentation
 
 | Topic | Document |

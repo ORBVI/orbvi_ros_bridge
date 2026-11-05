@@ -2,9 +2,13 @@
 
 [中文版本](README.zh-CN.md)
 
-Installing the bundled 4VL board runtime? See the
-[deb installation and bridge quick start](third_party/orbvi_sdk/deb/README.md)
-for package verification, board installation, startup checks and rollback.
+> **Upgrade notice:** this bridge version must run against the bundled board
+> runtime `orbvi-runtime 20261105.1+gb580d06d2208` (4V and 4VL packages). The new
+> localization, Omni-LIVO RGB cloud, SI IMU and rectified JPEG streams need the
+> matching board runtime; older boards (for example `2026.10.21+dev.db44d767`)
+> may miss topics. Upgrade the board first, then clean-rebuild the bridge. See the
+> [deb installation and bridge quick start](third_party/orbvi_sdk/deb/README.md)
+> for package selection, verification, board installation, startup checks and rollback.
 
 ORBVI ROS Bridge publishes ORBVI device data into ROS1 or ROS2 through the
 ORBVI Host SDK. It is intended for application developers who need camera, IMU,

@@ -9,9 +9,9 @@
 
 ```bash
 roslaunch orbvi_ros_bridge orbvi_ros_bridge_4v.launch \
-  streams:=raw,imu,vio publish_ipm:=true
+  streams:=raw,imu,localization publish_ipm:=true
 ros2 launch orbvi_ros_bridge orbvi_ros_bridge_4v.launch.py \
-  streams:=raw,imu,vio publish_ipm:=true
+  streams:=raw,imu,localization publish_ipm:=true
 ```
 
 Bridge 先订阅板端 `bev_display_stream`，Host 只把板端 JPEG 解码为 `1000x1000`

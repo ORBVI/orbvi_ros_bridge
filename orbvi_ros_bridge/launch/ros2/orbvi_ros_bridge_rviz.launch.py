@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -9,7 +9,8 @@ def generate_launch_description():
     rviz_config = PathJoinSubstitution([
         FindPackageShare("orbvi_ros_bridge"),
         "visuallize_config",
-        "rviz-config-ros2.rviz",
+        PythonExpression(["{'visual': 'rviz-visual-ros2.rviz', 'mid360': 'rviz-config-ros2.rviz'}['",
+                          LaunchConfiguration("profile"), "']"]),
     ])
     fastdds_shm_profile = PathJoinSubstitution([
         FindPackageShare("orbvi_ros_bridge"),
@@ -18,10 +19,14 @@ def generate_launch_description():
     ])
 
     return LaunchDescription([
+        DeclareLaunchArgument("profile", default_value="mid360", choices=["visual", "mid360"],
+                              description="visual: depth cloud; mid360: accumulated registered RGB cloud"),
         DeclareLaunchArgument(
             "fixed_frame",
-            default_value="camera_init",
-            description="Fixed frame: camera_init for 4VL poses (default), orbvi_link for device-frame depth, livox_frame for raw LiDAR, world for 4V VINS.",
+            default_value=PythonExpression([
+                "{'visual': 'orbvi_link', 'mid360': 'camera_init'}['",
+                LaunchConfiguration("profile"), "']"]),
+            description="Fixed frame: orbvi_link for depth, livox_frame for LiDAR; poses use their header frame (4VL: camera_init).",
         ),
         SetEnvironmentVariable(
             name="RMW_IMPLEMENTATION",

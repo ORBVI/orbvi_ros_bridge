@@ -12,7 +12,7 @@ override `streams`. Both accept the common arguments below.
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `host` | `192.168.3.100` | ORBVI device IP or hostname |
-| `streams` | 4V: `raw,rectified,pano,bev,imu,disparity,depth,vio`; 4VL: `raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio` | Comma-separated stream tokens; `pano` and `bev` select board-preferred display outputs |
+| `streams` | 4V: `raw,rectified,pano,bev,imu,disparity,depth,localization`; 4VL: `raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,localization,registered_cloud` | Comma-separated stream tokens; `pano` and `bev` select board-preferred display outputs |
 | `publish_lidar_pcl` | `false` | Also convert Livox `CustomMsg` to `/orbvi/lidar/points` |
 | `publish_ipm` | `false` | Request `/orbvi/ipm/image`: board-preferred in device mode, board GPU robot-ground projection without CPU fallback in robot mode |
 | `tf_mode` | `device` | Use `robot` to publish robot pose and apply installation extrinsics |
@@ -27,12 +27,48 @@ override `streams`. Both accept the common arguments below.
 | `ipm_max_publish_rate_hz` | `5.0` | Device-mode CPU fallback maximum rate; zero disables throttling |
 | `ipm_frame_id` | auto | Device: `base_link`; robot: mounting parent, which cannot be overridden with a different frame |
 | `depth_viz_show_grid_values` | `false` | Draw a 5x5 grid and metric grid-point values on each directional depth visualization |
-| `publish_vio_path` | `true` | Accumulate optimized `/orbvi/vio/odometry` and publish `/orbvi/vio/path` |
-| `vio_path_max_poses` | `2000` | Maximum poses retained in the Path; values at or below zero are clamped to 1 |
-| `vio_path_publish_rate_hz` | `10.0` | Maximum Path publication rate; zero publishes every optimized odometry update |
+| `publish_localization_path` | `true` | Accumulate optimized `/orbvi/localization/odometry` and publish `/orbvi/localization/path` |
+| `localization_path_max_poses` | `2000` | Maximum poses retained in the Path; values at or below zero are clamped to 1 |
+| `localization_path_publish_rate_hz` | `10.0` | Maximum Path publication rate; zero publishes every optimized odometry update |
 
 Topic names are fixed under `/orbvi`. BEV/IPM and panorama behavior is described
 in [Panorama and BEV](PANORAMA_BEV.md).
+
+## Localization Migration and Stream Compatibility
+
+Pose, trajectory and prediction use `/orbvi/localization/{odometry,path,imu_prediction}`.
+Update legacy subscribers or use ROS remapping. Launch arguments use
+`publish_localization_tf`, `publish_localization_path`, `localization_path_max_poses`
+and `localization_path_publish_rate_hz`. The node honors deprecated `publish_vio_*`
+and `vio_path_*` parameters, with a warning, only when the new name is unset;
+launch entrypoints accept the new names. `localization`, `vio` and the legacy
+`vio_pose_stream` token subscribe to both `optimized_pose_stream` and
+`predicted_pose_stream`; the deprecated mixed stream is never subscribed.
+Either split stream name can also be requested individually. Optimized poses
+publish odometry, path and dynamic TF; predictions publish only
+`/orbvi/localization/imu_prediction`.
+
+LiDAR acceleration is converted to m/s² using SDK unit parameters; covariance
+is multiplied by the squared scale, retaining the `-1` unavailable marker.
+Startup and conversion share supported-unit and finite-scale checks. Missing or
+invalid parameters skip only `lidar_imu` with a warning; units are never guessed.
+
+4VL requests optional `registered_cloud` by default. A manifest explicitly
+excluding it causes a skip; legacy firmware without a manifest is probed by
+subscription. Primary streams subscribe before optional registered clouds.
+Individual subscription failures preserve other streams; startup fails if no
+subscriptions succeed. Async admission without a first frame after
+`first_frame_timeout_ms` produces a per-stream warning with the SDK reason.
+Restart the bridge after fixing board capability or configuration.
+
+Rectified JPEG output supports legacy bundles, V2 dual atlases and UVC/Bulk
+single atlases through SDK lossless cropping into eight images. Invalid
+topic/frame identities, empty images and unsupported formats produce diagnostics.
+
+ROS2 workers serialize each topic while independent topics run concurrently;
+enqueue wakes one worker. Overflow drops the oldest pending task with a
+throttled warning. Source sampling timestamps remain unchanged; this does not
+repair board clock regressions.
 
 ## Depth Visualization Grid
 
@@ -54,19 +90,19 @@ vertical lines, and 25 labels per direction; drawing is in-place on the
 existing visualization buffer and is skipped entirely while the option is
 disabled.
 
-## VIO Path, Pose And TF
+## Localization Path, Pose And TF
 
-`/orbvi/vio/path` does not consume `/orbvi/vio/imu_prediction`. Each pose keeps
+`/orbvi/localization/path` does not consume `/orbvi/localization/imu_prediction`. Each pose keeps
 the optimized odometry frame, timestamp, and pose. The history resets when the
 frame changes or timestamps roll back. Memory and message size are bounded to
-`O(vio_path_max_poses)`, and the complete Path is published at no more than
+`O(localization_path_max_poses)`, and the complete Path is published at no more than
 10 Hz by default. Reduce the pose or rate limit for high-rate or low-bandwidth
-links, or set `publish_vio_path:=false` to disable the output.
+links, or set `publish_localization_path:=false` to disable the output.
 
 The 4VL native Omni-LIVO adapter uses the same pose stream. Both ROS1 and ROS2
 recognize `localization_source=omni_livo`: `pose_kind=OPTIMIZED` is published on
-`/orbvi/vio/odometry` and `/orbvi/vio/path`, while `pose_kind=PROPAGATED` is
-published on `/orbvi/vio/imu_prediction`. Predictions never broadcast optimized
+`/orbvi/localization/odometry` and `/orbvi/localization/path`, while `pose_kind=PROPAGATED` is
+published on `/orbvi/localization/imu_prediction`. Predictions never broadcast optimized
 TF. Optimized samples marked `tracking_state=DEGRADED` (including `recovering`)
 remain available as Odometry but do not advance TF until `TRACKING` resumes.
 A TF rejection message reports the actual tracking reason, timestamp,
@@ -83,7 +119,7 @@ for the tested versions, live results and remaining depth-quality limits.
 Both ROS1 and ROS2 bridges publish Omni-LIVO dynamic and calibrated static TF.
 In default device mode `camera_init → aft_mapped` connects LiDAR, LiDAR IMU, four raw cameras and SDK
 ROS_BODY depth clouds. Static TF is available immediately after calibration,
-without a pose subscription. `publish_vio_tf` defaults to true;
+without a pose subscription. `publish_localization_tf` defaults to true;
 `publish_sensor_tf` inherits it and can be enabled independently. The standalone
 `orbvi_export_extrinsics` tool exports JSON with calibration hashes. Raw image
 frames become `orbvi/camera/<SDK camera ID>`; LiDAR IMU becomes `mid360_imu`.

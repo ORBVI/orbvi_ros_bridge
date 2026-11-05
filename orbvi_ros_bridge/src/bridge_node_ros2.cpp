@@ -1,3 +1,5 @@
+#include "stream_availability.hpp"
+#include "localization_streams.hpp"
 #include "pose_tf_diagnostics.hpp"
 #include "transform_adapters.hpp"
 #include "board_ipm.hpp"
@@ -7,6 +9,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include "bridge_node_ros2.hpp"
+#include "ordered_publish_queue.hpp"
 
 #include <algorithm>
 #include <array>
@@ -78,7 +81,9 @@ struct BridgeConfig {
       orbvi_sdk::StreamId::LidarPointCloud,
       orbvi_sdk::StreamId::LidarImu,
       orbvi_sdk::StreamId::Disparity,
-      orbvi_sdk::StreamId::VioPose,
+      orbvi_sdk::StreamId::OptimizedPose,
+      orbvi_sdk::StreamId::PredictedPose,
+      orbvi_sdk::StreamId::RegisteredCloud,
   };
   bool require_streaming_transport = true;
   bool allow_sample_endpoint_fallback = false;
@@ -93,16 +98,16 @@ struct BridgeConfig {
   bool publish_panorama = false;
   IpmOptions ipm;
   bool publish_lidar_pcl = false;
-  bool publish_vio_path = true;
-  bool publish_vio_tf = true;
+  bool publish_localization_path = true;
+  bool publish_localization_tf = true;
   bool publish_sensor_tf = true;
   std::string tf_mode = "device";
   std::string mounting_config;
   bool publish_mounting_tf = false;
   bool publish_odom_tf = false;
   std::string odom_frame = "odom";
-  std::size_t vio_path_max_poses = 2000;
-  double vio_path_publish_rate_hz = 10.0;
+  std::size_t localization_path_max_poses = 2000;
+  double localization_path_publish_rate_hz = 10.0;
   bool sensor_data_best_effort = false;
   bool log_delivery_stats = false;
   orbvi_sdk::DepthGenerationOptions depth_options;
@@ -313,6 +318,21 @@ class ParameterReader {
     getParam(name, value);
   }
 
+  // The new name wins; the deprecated name is honored only when the new one is unset.
+  template <typename T>
+  void paramRenamed(
+      const std::string& name,
+      const std::string& deprecated_name,
+      T& value,
+      const T& default_value) {
+    param(name, value, default_value);
+    const auto& overrides = node_->get_node_parameters_interface()->get_parameter_overrides();
+    if (overrides.count(name) == 0 && overrides.count(deprecated_name) != 0) {
+      param(deprecated_name, value, value);
+      ROS_WARN("Parameter %s is deprecated; use %s", deprecated_name.c_str(), name.c_str());
+    }
+  }
+
   template <typename T>
   bool getParam(const std::string& name, T& value) const {
     if (!node_->has_parameter(name)) {
@@ -376,6 +396,7 @@ class BridgeNode::Impl {
 
   bool Start() {
     config_ = LoadConfig();
+    config_.streams = ResolveLocalizationStreams(config_.streams);
     orbvi_sdk::ClientOptions options;
     options.host = config_.host;
     options.control_port = config_.control_port;
@@ -410,8 +431,8 @@ class BridgeNode::Impl {
         config_.pointcloud_options.frame_id = tf_setup_.device_frame;
       if (config_.ipm.frame_id.empty())
         config_.ipm.frame_id = tf_setup_.mounting ? tf_setup_.mounting->base_from_device.parent : "base_link";
-      if (config_.publish_odom_tf && (!tf_setup_.mounting || !config_.publish_vio_tf))
-        throw std::runtime_error("publish_odom_tf requires robot mode and publish_vio_tf");
+      if (config_.publish_odom_tf && (!tf_setup_.mounting || !config_.publish_localization_tf))
+        throw std::runtime_error("publish_odom_tf requires robot mode and publish_localization_tf");
       if (config_.publish_odom_tf && (config_.odom_frame == tf_setup_.device_frame || !tf_setup_.mounting->ground_plane ||
           !StartupOdomTransform({"camera_init",tf_setup_.mounting->base_from_device.parent,{}, {0,0,0,1}},
               *tf_setup_.mounting->ground_plane,config_.odom_frame)))
@@ -432,7 +453,7 @@ class BridgeNode::Impl {
     sensor_calibration_.reset();
     pose_transform_gate_ = PoseTransformGate{};
     pose_tf_diagnostics_ = PoseTfDiagnostics{};
-    if (config_.publish_vio_tf)
+    if (config_.publish_localization_tf)
       vio_tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
     if (config_.publish_sensor_tf || config_.publish_odom_tf)
       sensor_tf_broadcaster_ = std::make_unique<tf2_ros::StaticTransformBroadcaster>(node_);
@@ -448,38 +469,83 @@ class BridgeNode::Impl {
 
 
     StartPublishWorkers();
+    const auto device_info = client_->getDeviceInfo();
+    if (!device_info) {
+      ROS_WARN_STREAM("Device capabilities unavailable; checking streams by subscription: "
+                      << device_info.error().message);
+    }
+    lidar_imu_parameters_.reset();
+    if (HasStream(config_.streams, orbvi_sdk::StreamId::LidarImu)) {
+      const auto parameters = client_->getLidarImuParameters();
+      if (parameters && ValidLidarImuParameters(&parameters.value())) {
+        lidar_imu_parameters_ = parameters.value();
+        ROS_INFO("LiDAR IMU acceleration scale to m/s^2: %.9g",
+                 lidar_imu_parameters_->linear_acceleration_scale_to_mps2);
+      } else if (!parameters) {
+        ROS_WARN_STREAM("LiDAR IMU parameters unavailable: " << parameters.error().message);
+      }
+    }
+    std::vector<orbvi_sdk::StreamId> available_streams;
+    for (const auto stream : config_.streams) {
+      const auto reason = StreamUnavailableReason(stream,
+          device_info ? &device_info.value() : nullptr,
+          lidar_imu_parameters_ ? &*lidar_imu_parameters_ : nullptr);
+      if (reason.empty()) available_streams.push_back(stream);
+      else ROS_WARN_STREAM("Skipping Host SDK stream " << orbvi_sdk::ToString(stream)
+                           << ": " << reason << "; other streams remain enabled");
+    }
+    // A failed SDK session admission may block later admissions on this client.
+    // Establish primary streams before probing the optional registered cloud.
+    std::stable_partition(available_streams.begin(), available_streams.end(),
+        [](orbvi_sdk::StreamId stream) { return stream != orbvi_sdk::StreamId::RegisteredCloud; });
+    config_.streams = std::move(available_streams);
     PrepareDepthPublisher();
     PreparePoseTransforms();
     if (!PrepareIpmPublisher()) {
-      Stop();
-      return false;
+      config_.ipm.enabled = false;
+      config_.ipm.host_fallback_active = false;
+      ROS_WARN("IPM unavailable; other streams remain enabled");
     }
     StartDepthDerivedWorker();
 
     for (const auto stream : config_.streams) {
       if (!Subscribe(stream)) {
-        Stop();
-        return false;
+        ROS_WARN_STREAM("Skipping unavailable Host SDK stream " << orbvi_sdk::ToString(stream)
+                        << "; other streams remain enabled");
       }
     }
     if (config_.publish_panorama && !SubscribePanorama()) {
+      config_.publish_panorama = false;
+      ROS_WARN("Panorama unavailable; other streams remain enabled");
+    }
+    if (subscriptions_.empty() && !panorama_subscription_) {
+      ROS_ERROR("No requested Host SDK streams could be subscribed; bridge cannot start");
       Stop();
       return false;
     }
 
+    stream_health_started_ = std::chrono::steady_clock::now();
+    stream_health_timer_ = node_->create_wall_timer(std::chrono::seconds(1),
+        [this]() { ReportStreamHealth(); });
     ROS_INFO_STREAM(
         "orbvi_ros_bridge started with Host SDK " << ORBVI_ROS_BRIDGE_HOST_SDK_LINKAGE
         << " library, host=" << config_.host << ":" << config_.control_port);
-    if (config_.publish_vio_path) {
+    if (config_.publish_localization_path) {
       ROS_INFO_STREAM(
-          "VIO path enabled on " << JoinTopic(config_.topic_prefix, "vio/path")
-          << ", max_poses=" << config_.vio_path_max_poses
-          << ", max_publish_rate_hz=" << config_.vio_path_publish_rate_hz);
+          "Localization path enabled on " << JoinTopic(config_.topic_prefix, "localization/path")
+          << ", max_poses=" << config_.localization_path_max_poses
+          << ", max_publish_rate_hz=" << config_.localization_path_publish_rate_hz);
     }
     return true;
   }
 
   void Stop() {
+    if (stream_health_timer_) stream_health_timer_->cancel();
+    stream_health_timer_.reset();
+    {
+      std::lock_guard<std::mutex> lock(stream_health_mutex_);
+      stream_health_.clear();
+    }
     if (robot_tf_timer_) robot_tf_timer_->cancel();
     robot_static_subscription_.reset();robot_dynamic_subscription_.reset();
     if (panorama_subscription_) {
@@ -685,35 +751,35 @@ class BridgeNode::Impl {
         "publish_lidar_pcl",
         config.publish_lidar_pcl,
         config.publish_lidar_pcl);
-    private_node_.param<bool>(
-        "publish_vio_path",
-        config.publish_vio_path,
-        config.publish_vio_path);
-    private_node_.param<bool>(
-        "publish_vio_tf",
-        config.publish_vio_tf,
-        config.publish_vio_tf);
-    private_node_.param<bool>("publish_sensor_tf", config.publish_sensor_tf, config.publish_vio_tf);
+    private_node_.paramRenamed<bool>(
+        "publish_localization_path", "publish_vio_path",
+        config.publish_localization_path,
+        config.publish_localization_path);
+    private_node_.paramRenamed<bool>(
+        "publish_localization_tf", "publish_vio_tf",
+        config.publish_localization_tf,
+        config.publish_localization_tf);
+    private_node_.param<bool>("publish_sensor_tf", config.publish_sensor_tf, config.publish_localization_tf);
     private_node_.param<std::string>("tf_mode", config.tf_mode, config.tf_mode);
     private_node_.param<std::string>("mounting_config", config.mounting_config, config.mounting_config);
     private_node_.param<bool>("publish_mounting_tf", config.publish_mounting_tf, config.publish_mounting_tf);
     private_node_.param<bool>("publish_odom_tf", config.publish_odom_tf, config.publish_odom_tf);
     private_node_.param<std::string>("odom_frame", config.odom_frame, config.odom_frame);
-    int vio_path_max_poses = static_cast<int>(config.vio_path_max_poses);
-    private_node_.param<int>(
-        "vio_path_max_poses",
-        vio_path_max_poses,
-        vio_path_max_poses);
-    config.vio_path_max_poses =
-        vio_path_max_poses <= 0 ? 1u : static_cast<std::size_t>(vio_path_max_poses);
-    private_node_.param<double>(
-        "vio_path_publish_rate_hz",
-        config.vio_path_publish_rate_hz,
-        config.vio_path_publish_rate_hz);
-    if (!std::isfinite(config.vio_path_publish_rate_hz) ||
-        config.vio_path_publish_rate_hz < 0.0) {
-      ROS_WARN("Invalid vio_path_publish_rate_hz; using 10 Hz");
-      config.vio_path_publish_rate_hz = 10.0;
+    int localization_path_max_poses = static_cast<int>(config.localization_path_max_poses);
+    private_node_.paramRenamed<int>(
+        "localization_path_max_poses", "vio_path_max_poses",
+        localization_path_max_poses,
+        localization_path_max_poses);
+    config.localization_path_max_poses =
+        localization_path_max_poses <= 0 ? 1u : static_cast<std::size_t>(localization_path_max_poses);
+    private_node_.paramRenamed<double>(
+        "localization_path_publish_rate_hz", "vio_path_publish_rate_hz",
+        config.localization_path_publish_rate_hz,
+        config.localization_path_publish_rate_hz);
+    if (!std::isfinite(config.localization_path_publish_rate_hz) ||
+        config.localization_path_publish_rate_hz < 0.0) {
+      ROS_WARN("Invalid localization_path_publish_rate_hz; using 10 Hz");
+      config.localization_path_publish_rate_hz = 10.0;
     }
     if (config.publish_panorama && config.panorama_options.stitch.depth_assist &&
         !HasStream(config.streams, orbvi_sdk::StreamId::Disparity)) {
@@ -752,7 +818,7 @@ class BridgeNode::Impl {
   }
 
   void LoadStreams(BridgeConfig* config) {
-    std::string streams = "raw,rectified,imu,lidar,lidar_imu,disparity,depth,vio";
+    std::string streams = "raw,rectified,imu,lidar,lidar_imu,disparity,depth,localization";
     private_node_.param<std::string>("streams", streams, streams);
     config->streams.clear();
     config->publish_depth = false;
@@ -1511,6 +1577,28 @@ class BridgeNode::Impl {
         build_ms == log_depth->metadata.end() ? "unknown" : build_ms->second.c_str());
   }
 
+  // subscribe() admits asynchronously: success does not certify a first frame.
+  void ReportStreamHealth() {
+    std::lock_guard<std::mutex> lock(stream_health_mutex_);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stream_health_started_).count();
+    for (auto& health : stream_health_) {
+      if (health.received) continue;
+      const auto stats = subscriptions_[health.subscription].stats();
+      if (stats.delivered_frames > 0) {
+        if (health.warned)
+          ROS_INFO_STREAM("Host SDK stream " << orbvi_sdk::ToString(health.stream)
+                          << " received its first frame after a startup delay");
+        health.received = true;
+      } else if (!health.warned && elapsed >= config_.first_frame_timeout_ms) {
+        ROS_WARN_STREAM("No first frame from Host SDK stream " << orbvi_sdk::ToString(health.stream)
+                        << " after " << elapsed << " ms; other streams remain enabled; reason="
+                        << (stats.blocked_reason.empty() ? "no data received" : stats.blocked_reason));
+        health.warned = true;
+      }
+    }
+  }
+
   bool Subscribe(orbvi_sdk::StreamId stream) {
     orbvi_sdk::SubscribeOptions options;
     options.decode_policy.mode =
@@ -1534,6 +1622,7 @@ class BridgeNode::Impl {
           << ": " << result.error().message);
       return false;
     }
+    stream_health_.push_back({stream, subscriptions_.size()});
     subscriptions_.push_back(std::move(result.value()));
     ROS_INFO_STREAM("Subscribed Host SDK stream " << orbvi_sdk::ToString(stream));
     return true;
@@ -1654,7 +1743,7 @@ class BridgeNode::Impl {
     auto publisher = Publisher<MessageT>(topic);
     if (config_.publish_worker_threads > 0 && IsSensorDataMessage<MessageT>()) {
       auto shared_message = std::make_shared<MessageT>(std::move(message));
-      EnqueuePublishTask([publisher, shared_message]() {
+      EnqueuePublishTask(topic, [publisher, shared_message]() {
         publisher->publish(*shared_message);
       });
       return;
@@ -1672,77 +1761,22 @@ class BridgeNode::Impl {
   }
 
   void StartPublishWorkers() {
-    StopPublishWorkers();
-    if (config_.publish_worker_threads == 0) {
-      return;
-    }
-    {
-      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
-      publish_workers_stop_ = false;
-      publish_queue_.clear();
-      publish_tasks_dropped_ = 0;
-    }
-    publish_workers_.reserve(config_.publish_worker_threads);
-    for (std::uint32_t i = 0; i < config_.publish_worker_threads; ++i) {
-      publish_workers_.emplace_back([this]() { PublishWorkerLoop(); });
-    }
+    publish_queue_.Start(config_.publish_worker_threads, config_.max_publish_queue_depth);
   }
 
-  void StopPublishWorkers() {
-    {
-      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
-      publish_workers_stop_ = true;
-      publish_queue_.clear();
-    }
-    publish_queue_cv_.notify_all();
-    for (auto& worker : publish_workers_) {
-      if (worker.joinable()) {
-        worker.join();
-      }
-    }
-    publish_workers_.clear();
-    {
-      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
-      publish_workers_stop_ = false;
-    }
-  }
+  void StopPublishWorkers() { publish_queue_.Stop(); }
 
-  void EnqueuePublishTask(std::function<void()> task) {
-    {
-      std::lock_guard<std::mutex> lock(publish_queue_mutex_);
-      if (publish_workers_stop_) {
-        return;
-      }
-      if (publish_queue_.size() >= config_.max_publish_queue_depth) {
-        publish_queue_.pop_front();
-        ++publish_tasks_dropped_;
-        ROS_WARN_THROTTLE(
-            2.0,
-            "ROS publish queue full; dropped oldest sensor publish task "
-            "(dropped=%llu depth=%zu)",
-            static_cast<unsigned long long>(publish_tasks_dropped_),
-            config_.max_publish_queue_depth);
-      }
-      publish_queue_.push_back(std::move(task));
-    }
-    publish_queue_cv_.notify_one();
-  }
-
-  void PublishWorkerLoop() {
-    while (true) {
-      std::function<void()> task;
-      {
-        std::unique_lock<std::mutex> lock(publish_queue_mutex_);
-        publish_queue_cv_.wait(lock, [this]() {
-          return publish_workers_stop_ || !publish_queue_.empty();
-        });
-        if (publish_workers_stop_ && publish_queue_.empty()) {
-          return;
-        }
-        task = std::move(publish_queue_.front());
-        publish_queue_.pop_front();
-      }
-      task();
+  void EnqueuePublishTask(const std::string& topic, std::function<void()> task) {
+    const auto result = publish_queue_.Enqueue(topic, std::move(task));
+    if (result.dropped_oldest) {
+      // The ROS throttle macro has mutable call-site state.
+      std::lock_guard<std::mutex> lock(publish_warning_mutex_);
+      ROS_WARN_THROTTLE(
+          2.0,
+          "ROS publish queue full; dropped oldest sensor publish task "
+          "(dropped=%llu depth=%zu)",
+          static_cast<unsigned long long>(result.total_dropped),
+          config_.max_publish_queue_depth);
     }
   }
 
@@ -1781,10 +1815,15 @@ class BridgeNode::Impl {
       case orbvi_sdk::StreamId::LidarPointCloud:
         PublishLivox(frame);
         break;
+      case orbvi_sdk::StreamId::RegisteredCloud:
+        PublishRegisteredCloud(frame);
+        break;
       case orbvi_sdk::StreamId::Disparity:
         PublishDisparity(frame);
         break;
       case orbvi_sdk::StreamId::VioPose:
+      case orbvi_sdk::StreamId::OptimizedPose:
+      case orbvi_sdk::StreamId::PredictedPose:
         PublishVio(frame);
         break;
       default:
@@ -2029,13 +2068,23 @@ class BridgeNode::Impl {
 
   void PublishImu(const orbvi_sdk::FrameView& frame) {
     sensor_msgs::msg::Imu message;
-    if (!MakeImuMessage(frame, &message)) {
+    if (!MakeImuMessage(frame, &message,
+                        lidar_imu_parameters_ ? &*lidar_imu_parameters_ : nullptr)) {
       ROS_WARN_THROTTLE(5.0, "Failed to parse Host SDK IMU payload");
       return;
     }
     const std::string suffix =
         frame.stream_id == orbvi_sdk::StreamId::LidarImu ? "lidar/imu" : "imu";
     PublishMessage(JoinTopic(config_.topic_prefix, suffix), std::move(message));
+  }
+
+  void PublishRegisteredCloud(const orbvi_sdk::FrameView& frame) {
+    sensor_msgs::msg::PointCloud2 message;
+    if (!MakeRegisteredCloudMessage(frame, &message)) {
+      ROS_WARN_THROTTLE(5.0, "Failed to convert Host SDK registered RGB cloud");
+      return;
+    }
+    PublishMessage(JoinTopic(config_.topic_prefix, "cloud_registered"), std::move(message));
   }
 
   void PublishLivox(const orbvi_sdk::FrameView& frame) {
@@ -2192,7 +2241,7 @@ class BridgeNode::Impl {
     }
     Publisher<nav_msgs::msg::Odometry>(JoinTopic(config_.topic_prefix, suffix))
         ->publish(message);
-    if (config_.publish_vio_tf && suffix == "vio/odometry") {
+    if (config_.publish_localization_tf && suffix == "localization/odometry") {
       geometry_msgs::msg::TransformStamped transform;
       std::lock_guard<std::mutex> lock(vio_tf_mutex_);
       bool producer_changed = false;
@@ -2225,7 +2274,7 @@ class BridgeNode::Impl {
         else ROS_INFO("%s", report->message.c_str());
       }
     }
-    if (!config_.publish_vio_path || suffix != "vio/odometry") {
+    if (!config_.publish_localization_path || suffix != "localization/odometry") {
       return;
     }
 
@@ -2234,19 +2283,19 @@ class BridgeNode::Impl {
       std::lock_guard<std::mutex> lock(vio_path_mutex_);
       if (!AppendVioOdometryToPath(
               message,
-              config_.vio_path_max_poses,
+              config_.localization_path_max_poses,
               &vio_path_)) {
         ROS_WARN_THROTTLE(5.0, "Failed to append optimized VIO odometry to Path");
         return;
       }
       const auto now = std::chrono::steady_clock::now();
-      const bool rate_unlimited = config_.vio_path_publish_rate_hz <= 0.0;
+      const bool rate_unlimited = config_.localization_path_publish_rate_hz <= 0.0;
       const bool first_publish =
           last_vio_path_publish_time_ == std::chrono::steady_clock::time_point();
       if (!rate_unlimited && !first_publish) {
         const auto publish_period =
             std::chrono::duration<double>(
-                1.0 / config_.vio_path_publish_rate_hz);
+                1.0 / config_.localization_path_publish_rate_hz);
         if (now - last_vio_path_publish_time_ < publish_period) {
           return;
         }
@@ -2255,7 +2304,7 @@ class BridgeNode::Impl {
       path_message = vio_path_;
     }
     PublishMessage(
-        JoinTopic(config_.topic_prefix, "vio/path"),
+        JoinTopic(config_.topic_prefix, "localization/path"),
         std::move(path_message));
   }
 
@@ -2263,6 +2312,7 @@ class BridgeNode::Impl {
   ParameterReader private_node_;
   BridgeConfig config_;
   std::unique_ptr<orbvi_sdk::Client> client_;
+  std::optional<orbvi_sdk::LidarImuParameters> lidar_imu_parameters_;
   TfSetup tf_setup_;
   std::unique_ptr<RobotTfSession> robot_tf_session_;
   std::unique_ptr<tf2_ros::Buffer> robot_tf_buffer_;
@@ -2280,6 +2330,17 @@ class BridgeNode::Impl {
   std::chrono::steady_clock::time_point last_ipm_publish_time_;
   std::optional<orbvi_sdk::PanoramaSubscriptionHandle> panorama_subscription_;
   std::vector<orbvi_sdk::SubscriptionHandle> subscriptions_;
+  struct StreamHealth {
+    orbvi_sdk::StreamId stream;
+    std::size_t subscription;
+    bool warned = false;
+    bool received = false;
+  };
+  std::mutex stream_health_mutex_;
+  std::vector<StreamHealth> stream_health_;
+  std::chrono::steady_clock::time_point stream_health_started_;
+  rclcpp::TimerBase::SharedPtr stream_health_timer_;
+
   std::mutex panorama_depth_mutex_;
   std::deque<std::shared_ptr<const orbvi_sdk::RigDepthPanorama>> panorama_depth_frames_;
   std::array<double, 3> panorama_depth_origin_reference_m_ = {0.0, 0.0, 0.0};
@@ -2294,12 +2355,8 @@ class BridgeNode::Impl {
   std::thread depth_derived_worker_;
   bool depth_derived_stop_ = false;
   bool depth_derived_pending_ = false;
-  std::mutex publish_queue_mutex_;
-  std::condition_variable publish_queue_cv_;
-  std::deque<std::function<void()>> publish_queue_;
-  std::vector<std::thread> publish_workers_;
-  bool publish_workers_stop_ = false;
-  std::uint64_t publish_tasks_dropped_ = 0;
+  OrderedPublishQueue publish_queue_;
+  std::mutex publish_warning_mutex_;
   std::mutex vio_path_mutex_;
   nav_msgs::msg::Path vio_path_;
   std::chrono::steady_clock::time_point last_vio_path_publish_time_;

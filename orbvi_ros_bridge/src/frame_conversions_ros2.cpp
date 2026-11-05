@@ -1,3 +1,4 @@
+#include "imu_units.hpp"
 #include "transform_adapters.hpp"
 #include "frame_conversions_ros2.hpp"
 
@@ -15,6 +16,7 @@
 #include <utility>
 
 #include "orbvi_sdk/image.hpp"
+#include "orbvi_sdk/registered_cloud.hpp"
 
 #include <builtin_interfaces/msg/time.hpp>
 #include <opencv2/core.hpp>
@@ -1028,8 +1030,10 @@ bool ParseBridgeStream(const std::string& input, orbvi_sdk::StreamId* out) {
     name = "lidar_imu_stream";
   } else if (name == "disparity") {
     name = "disparity_stream";
-  } else if (name == "vio") {
+  } else if (name == "localization" || name == "vio") {
     name = "vio_pose_stream";
+  } else if (name == "registered_cloud") {
+    name = "registered_cloud_stream";
   } else if (IsBridgePanoramaToken(name) || IsBridgeBevToken(name)) {
     *out = orbvi_sdk::StreamId::Unknown;
     return false;
@@ -1087,6 +1091,44 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
     return outputs;
   }
 
+  if (frame.stream_id == orbvi_sdk::StreamId::RectifiedFisheye &&
+      (bundle_type == "RECTIFIED_FISHEYE_ATLAS_BUNDLE_V2" ||
+       MetadataValue(metadata, "layout") == "rectified_atlas_2x4_pair_major_left_right")) {
+    if (!split_bundles) {
+      if (skipped_reason != nullptr) {
+        *skipped_reason = "multi-image rectified frame cannot be published as one valid CompressedImage";
+      }
+      return outputs;
+    }
+    // The public SDK crops JPEG coefficients without decoding/re-encoding pixels
+    // and validates the atlas bounds, pair/side identity and per-image stamp.
+    auto extracted = orbvi_sdk::ExtractRectifiedCompressedImages(frame);
+    if (!extracted) {
+      if (skipped_reason != nullptr) {
+        *skipped_reason = "Failed to extract rectified JPEG images: " + extracted.error().message;
+      }
+      return outputs;
+    }
+    outputs.reserve(orbvi_sdk::kRectifiedImageCount);
+    for (auto& image : extracted.value().images) {
+      if (!image) continue;
+      CompressedImageOutput output;
+      output.topic_suffix = RectifiedTopicSuffix(
+          image->identity.pair_direction, image->identity.side, "image/compressed");
+      output.message.header = MakeHeader(image->timestamp_ns,
+          RectifiedFrameId(image->identity.pair_direction, image->identity.side));
+      output.message.format = "jpeg";
+      output.message.data = std::move(image->owned_jpeg);
+      if (output.topic_suffix.empty() || output.message.header.frame_id.empty() ||
+          output.message.data.empty()) {
+        if (skipped_reason) *skipped_reason = "SDK returned an invalid rectified atlas image";
+        return {};
+      }
+      outputs.push_back(std::move(output));
+    }
+    return outputs;
+  }
+
   if (bundle_type == "RECTIFIED_FISHEYE_BUNDLE") {
     if (!split_bundles) {
       if (skipped_reason != nullptr) {
@@ -1135,6 +1177,10 @@ std::vector<CompressedImageOutput> MakeCompressedImageMessages(
   CompressedImageOutput output;
   if (MakeSingleCompressedImage(frame, metadata, &output)) {
     outputs.push_back(std::move(output));
+  } else if (skipped_reason) {
+    *skipped_reason = "Unsupported compressed image frame: stream=" +
+        std::string(orbvi_sdk::ToString(frame.stream_id)) +
+        " bundle_type=" + (bundle_type.empty() ? "<none>" : bundle_type);
   }
   return outputs;
 }
@@ -1665,7 +1711,8 @@ bool MakePointCloudMessage(
   return true;
 }
 
-bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Imu* out) {
+bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Imu* out,
+                    const orbvi_sdk::LidarImuParameters* lidar_parameters) {
   if (out == nullptr || frame.payload_data == nullptr ||
       frame.payload_size < kImuPayloadDoubleCount * sizeof(double)) {
     return false;
@@ -1675,7 +1722,7 @@ bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Imu* ou
   if (frame.stream_id == orbvi_sdk::StreamId::LidarImu) {
     out->header.frame_id = "mid360_imu";
   }
-  return ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.x) &&
+  const bool parsed = ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.x) &&
          ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.y) &&
          ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.z) &&
          ReadPod(frame.payload_data, frame.payload_size, &offset, &out->orientation.w) &&
@@ -1688,17 +1735,25 @@ bool MakeImuMessage(const orbvi_sdk::FrameView& frame, sensor_msgs::msg::Imu* ou
          ReadPodArray(frame.payload_data, frame.payload_size, &offset, &out->orientation_covariance) &&
          ReadPodArray(frame.payload_data, frame.payload_size, &offset, &out->angular_velocity_covariance) &&
          ReadPodArray(frame.payload_data, frame.payload_size, &offset, &out->linear_acceleration_covariance);
+  return parsed && (frame.stream_id != orbvi_sdk::StreamId::LidarImu ||
+                    ConvertLidarImuToRosUnits(lidar_parameters, out));
 }
 
 std::string VioTopicSuffix(const orbvi_sdk::FrameView& frame) {
+  if (frame.stream_id == orbvi_sdk::StreamId::OptimizedPose) {
+    return "localization/odometry";
+  }
+  if (frame.stream_id == orbvi_sdk::StreamId::PredictedPose) {
+    return "localization/imu_prediction";
+  }
   const MetadataMap empty_metadata;
   const MetadataMap& metadata = frame.metadata != nullptr ? *frame.metadata : empty_metadata;
   const std::string source = LowerCopy(Trim(MetadataValue(metadata, "vio_source")));
   if (source == "optimized") {
-    return "vio/odometry";
+    return "localization/odometry";
   }
   if (source == "propagated") {
-    return "vio/imu_prediction";
+    return "localization/imu_prediction";
   }
   // 4VL's native Omni-LIVO adapter uses the shared VioPose wire format,
   // with localization_source/pose_kind instead of the VINS vio_source tag.
@@ -1706,13 +1761,54 @@ std::string VioTopicSuffix(const orbvi_sdk::FrameView& frame) {
       LowerCopy(Trim(MetadataValue(metadata, "localization_source"))) == "omni_livo") {
     const auto kind = LowerCopy(Trim(MetadataValue(metadata, "pose_kind")));
     if (kind == "optimized") {
-      return "vio/odometry";
+      return "localization/odometry";
     }
     if (kind == "propagated") {
-      return "vio/imu_prediction";
+      return "localization/imu_prediction";
     }
   }
   return "";
+}
+
+bool MakeRegisteredCloudMessage(
+    const orbvi_sdk::FrameView& frame,
+    sensor_msgs::msg::PointCloud2* out) {
+  if (out == nullptr || frame.compression != orbvi_sdk::Compression::None ||
+      frame.timestamp_ns / 1000000000ULL >
+          static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
+    return false;
+  }
+  const auto decoded = orbvi_sdk::DecodeRegisteredCloud(frame);
+  if (!decoded) {
+    return false;
+  }
+
+  // The SDK validates camera_init, realtime timestamps, finite XYZI and OLPC bounds.
+  // These points are already registered in the board world; do not transform again.
+  sensor_msgs::msg::PointCloud2 message;
+  message.header = MakeHeader(frame);
+  message.height = 1;
+  message.is_bigendian = false;
+  message.is_dense = true;
+  sensor_msgs::PointCloud2Modifier modifier(message);
+  modifier.setPointCloud2Fields(
+      5, "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+      "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+      "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+      "intensity", 1, sensor_msgs::msg::PointField::FLOAT32,
+      "rgb", 1, sensor_msgs::msg::PointField::FLOAT32);
+  modifier.resize(decoded.value().points.size());
+  sensor_msgs::PointCloud2Iterator<float> x(message, "x"), y(message, "y"),
+      z(message, "z"), intensity(message, "intensity");
+  sensor_msgs::PointCloud2Iterator<std::uint8_t> r(message, "r"),
+      g(message, "g"), b(message, "b");
+  for (const auto& point : decoded.value().points) {
+    *x = point.x; *y = point.y; *z = point.z; *intensity = point.intensity;
+    *r = point.red; *g = point.green; *b = point.blue;
+    ++x; ++y; ++z; ++intensity; ++r; ++g; ++b;
+  }
+  *out = std::move(message);
+  return true;
 }
 
 bool MakeLivoxCustomMessage(

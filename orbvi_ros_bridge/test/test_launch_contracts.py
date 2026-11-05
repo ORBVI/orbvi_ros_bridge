@@ -11,8 +11,8 @@ import xml.etree.ElementTree as ET
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
-FOUR_V_STREAMS = "raw,rectified,pano,bev,imu,disparity,depth,vio"
-FOUR_VL_STREAMS = "raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,vio"
+FOUR_V_STREAMS = "raw,rectified,pano,bev,imu,disparity,depth,localization"
+FOUR_VL_STREAMS = "raw,rectified,pano,bev,imu,lidar,lidar_imu,disparity,depth,localization,registered_cloud"
 
 ROS1_USER_LAUNCHES = {
     "orbvi_ros_bridge_4v.launch": FOUR_V_STREAMS,
@@ -33,16 +33,16 @@ USER_ARGUMENT_DEFAULTS = {
     "ipm_frame_id": "",
     "publish_ipm": "false",
     "depth_viz_show_grid_values": "false",
-    "publish_vio_path": "true",
-    "publish_vio_tf": "true",
+    "publish_localization_path": "true",
+    "publish_localization_tf": "true",
     "depth_pointcloud_frame_id": "",
     "tf_mode": "device",
     "mounting_config": "",
     "publish_mounting_tf": "false",
     "publish_odom_tf": "false",
     "odom_frame": "odom",
-    "vio_path_max_poses": "2000",
-    "vio_path_publish_rate_hz": "10.0",
+    "localization_path_max_poses": "2000",
+    "localization_path_publish_rate_hz": "10.0",
 }
 
 PANORAMA_ARGUMENT_DEFAULTS = {
@@ -150,13 +150,15 @@ class LaunchContractTest(unittest.TestCase):
                 path = PACKAGE_ROOT / "launch" / launch_name
                 expected_arguments = dict(USER_ARGUMENT_DEFAULTS)
                 expected_arguments["streams"] = expected_streams
-                expected_arguments["publish_sensor_tf"] = "$(arg publish_vio_tf)"
+                if "lidar" in expected_streams.split(","):
+                    expected_arguments["publish_lidar_pcl"] = "true"
+                expected_arguments["publish_sensor_tf"] = "$(arg publish_localization_tf)"
                 self.assertEqual(
                     ros1_arg_defaults(path),
                     expected_arguments,
                 )
                 self.assertEqual(ros1_param_value(path, "streams"), "$(arg streams)")
-                for name in ("publish_vio_tf", "publish_sensor_tf", "depth_pointcloud_frame_id", "tf_mode", "mounting_config", "publish_mounting_tf", "ipm_extent_m", "ipm_resolution_m_per_pixel", "ipm_max_publish_rate_hz", "ipm_frame_id"):
+                for name in ("publish_localization_tf", "publish_sensor_tf", "depth_pointcloud_frame_id", "tf_mode", "mounting_config", "publish_mounting_tf", "ipm_extent_m", "ipm_resolution_m_per_pixel", "ipm_max_publish_rate_hz", "ipm_frame_id"):
                     self.assertEqual(ros1_param_value(path, name), "$(arg " + name + ")")
                 self.assertEqual(
                     ros1_param_value(path, "depth_viz_show_grid_values"),
@@ -167,16 +169,16 @@ class LaunchContractTest(unittest.TestCase):
                     "$(arg publish_ipm)",
                 )
                 self.assertEqual(
-                    ros1_param_value(path, "publish_vio_path"),
-                    "$(arg publish_vio_path)",
+                    ros1_param_value(path, "publish_localization_path"),
+                    "$(arg publish_localization_path)",
                 )
                 self.assertEqual(
-                    ros1_param_value(path, "vio_path_max_poses"),
-                    "$(arg vio_path_max_poses)",
+                    ros1_param_value(path, "localization_path_max_poses"),
+                    "$(arg localization_path_max_poses)",
                 )
                 self.assertEqual(
-                    ros1_param_value(path, "vio_path_publish_rate_hz"),
-                    "$(arg vio_path_publish_rate_hz)",
+                    ros1_param_value(path, "localization_path_publish_rate_hz"),
+                    "$(arg localization_path_publish_rate_hz)",
                 )
 
     def test_ros2_launch_configs_expose_supported_user_arguments(self):
@@ -185,8 +187,10 @@ class LaunchContractTest(unittest.TestCase):
                 path = PACKAGE_ROOT / "launch" / "ros2" / launch_name
                 expected_arguments = dict(USER_ARGUMENT_DEFAULTS)
                 expected_arguments["sensor_data_best_effort"] = "false"
-                expected_arguments["publish_vio_tf"] = "true"
+                expected_arguments["publish_localization_tf"] = "true"
                 expected_arguments["streams"] = expected_streams
+                if "lidar" in expected_streams.split(","):
+                    expected_arguments["publish_lidar_pcl"] = "true"
                 self.assertEqual(
                     ros2_argument_defaults(path),
                     expected_arguments,
@@ -196,7 +200,7 @@ class LaunchContractTest(unittest.TestCase):
                 for argument in ("tf_mode", "mounting_config", "publish_mounting_tf", "ipm_extent_m", "ipm_resolution_m_per_pixel", "ipm_max_publish_rate_hz", "ipm_frame_id"):
                     self.assertIn('parameters["' + argument + '"]', source)
                     self.assertIn('LaunchConfiguration("' + argument + '")', source)
-                self.assertIn('default_value=LaunchConfiguration("publish_vio_tf")', source)
+                self.assertIn('default_value=LaunchConfiguration("publish_localization_tf")', source)
                 parameters = ros2_dict_assignment(path, "DEFAULT_BRIDGE_PARAMETERS")
                 self.assertEqual(parameters["streams"], expected_streams)
                 source = path.read_text(encoding="utf-8")
@@ -208,25 +212,26 @@ class LaunchContractTest(unittest.TestCase):
                     source,
                 )
                 self.assertIn(
-                    "LaunchConfiguration(\"publish_vio_path\")",
+                    "LaunchConfiguration(\"publish_localization_path\")",
                     source,
                 )
                 self.assertIn(
-                    "LaunchConfiguration(\"vio_path_max_poses\")",
+                    "LaunchConfiguration(\"localization_path_max_poses\")",
                     source,
                 )
                 self.assertIn(
-                    "LaunchConfiguration(\n        \"vio_path_publish_rate_hz\")",
+                    "LaunchConfiguration(\n        \"localization_path_publish_rate_hz\")",
                     source,
                 )
 
     def test_4vl_streams_are_4v_streams_with_lidar(self):
         four_v = FOUR_V_STREAMS.split(",")
         four_vl = FOUR_VL_STREAMS.split(",")
-        for stream in ("pano", "bev", "depth", "vio"):
+        for stream in ("pano", "bev", "depth", "localization"):
             self.assertIn(stream, four_v)
         self.assertNotIn("lidar", four_v)
-        self.assertEqual(sorted(set(four_vl) - set(four_v)), ["lidar", "lidar_imu"])
+        self.assertEqual(sorted(set(four_vl) - set(four_v)),
+                         ["lidar", "lidar_imu", "registered_cloud"])
         self.assertTrue(set(four_v).issubset(four_vl))
 
     def test_every_user_launch_loads_pano_config(self):
@@ -255,15 +260,15 @@ class LaunchContractTest(unittest.TestCase):
                 for name, expected_value in PANORAMA_ARGUMENT_DEFAULTS.items():
                     self.assertEqual(values[name], expected_value)
 
-    def test_rviz_configs_include_vio_path_display(self):
+    def test_rviz_configs_include_localization_path_display(self):
         configs = {
             "rviz-config.rviz": (
                 "Class: rviz/Path",
-                "Topic: /orbvi/vio/path",
+                "Topic: /orbvi/localization/path",
             ),
             "rviz-config-ros2.rviz": (
                 "Class: rviz_default_plugins/Path",
-                "Value: /orbvi/vio/path",
+                "Value: /orbvi/localization/path",
             ),
         }
         for config_name, expectations in configs.items():

@@ -9,28 +9,37 @@ front (3), right (2), rear (4), left (5), with the point-cloud view below.
 These directions refer to the device; use TF for robot mounting directions.
 Reopen the default RViz launch to load the layout.
 
-The ROS1/ROS2 RViz configs and launch files default to Fixed Frame
-`camera_init`, the 4VL Omni-LIVO world, so depth, LiDAR and the trajectory are
-shown together in the world while the device moves. This requires the bridge's
-dynamic TF from `camera_init` (`publish_vio_tf`, on by default; child `aft_mapped`, or `base_link` in robot mode) and the
-calibrated sensor TF tree; start the 4VL bridge launch with
-`publish_lidar_pcl:=true` to include LiDAR points. Without a localization TF,
-pass another frame, e.g. `fixed_frame:=orbvi_link`:
+Both ROS1 and ROS2 RViz launches default to `profile:=mid360`: the
+`camera_init` world view, accumulating `/orbvi/cloud_registered` for 1000 seconds.
+Use `profile:=visual` for live colored depth in `orbvi_link` without localization TF.
+Enable `Registered RGB Cloud (Live)` independently for the current scan.
+`fixed_frame:=<frame>` overrides either profile.
 
 ```bash
-roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch fixed_frame:=orbvi_link
-ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py fixed_frame:=orbvi_link
+roslaunch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch profile:=mid360
+ros2 launch orbvi_ros_bridge orbvi_ros_bridge_rviz.launch.py profile:=mid360
 ```
+
+Accumulation retains scans without voxel deduplication; memory and rendering
+cost grow with point count, rate and retention time. Reduce Decay Time or use
+Live for lower resource usage. To view raw LiDAR, enable `publish_lidar_pcl:=true`
+in the 4VL bridge and turn on `LiDAR Points`; `fixed_frame:=livox_frame` displays
+LiDAR independently.
+
+The `mid360` world view requires the bridge's dynamic TF from `camera_init`
+(`publish_localization_tf`, on by default; child `aft_mapped`, or `base_link`
+in robot mode) and the calibrated sensor TF tree. Without localization TF,
+use `profile:=visual` or `fixed_frame:=orbvi_link`.
 
 ### Fixed Frame choices
 
 | Frame | Meaning | Use it to view |
 | --- | --- | --- |
-| `camera_init` (default) | Omni-LIVO world fixed at initialization: gravity-aligned Z-up, origin at the initial MID360 IMU, yaw not tied to the robot front | 4VL trajectory, map/scan clouds, and depth/LiDAR placed in the world |
+| `camera_init` (`mid360` default) | Omni-LIVO world fixed at initialization: gravity-aligned Z-up, origin at the initial MID360 IMU, yaw not tied to the robot front | 4VL trajectory, map/scan clouds, and depth/LiDAR placed in the world |
 | `odom` | Optional startup origin above `camera_init` (`tf_mode:=robot publish_odom_tf:=true`): origin on the ground below the robot, yaw along the initial robot front | Robot motion starting from zero |
 | `world` | 4V VINS world | 4V trajectory only; not connected to the depth tree yet |
 | `aft_mapped` / `mid360_imu` | Current MID360 IMU state (moves with the device); `mid360_imu` is the same physical frame | IMU-centred view of the device |
-| `orbvi_link` | Device-fixed SDK ROS_BODY reference: camera-rig origin, axes forward/left/up | Depth in device coordinates, depth/LiDAR alignment; needs no localization TF |
+| `orbvi_link` (`visual` default) | Device-fixed SDK ROS_BODY reference: camera-rig origin, axes forward/left/up | Depth in device coordinates, depth/LiDAR alignment; needs no localization TF |
 | `base_link` | Robot body (robot mode, from URDF or `mounting_config`) | Data in robot coordinates |
 | `livox_frame` | MID360 point coordinates | Raw LiDAR alone |
 | `orbvi/camera/<id>` | Raw camera optical frames (right/down/forward), IDs 3/2/4/5 = front/right/rear/left | Checking a single camera's projection |
@@ -44,12 +53,12 @@ Point clouds, odometry, and the trajectory can be viewed in RViz:
 
 - `/orbvi/lidar/custom`
 - `/orbvi/depth/points`
-- `/orbvi/vio/odometry`
-- `/orbvi/vio/path`
+- `/orbvi/localization/odometry`
+- `/orbvi/localization/path`
 
-The bundled ROS1 and ROS2 RViz configurations include a `VIO Path` display.
+The bundled ROS1 and ROS2 RViz configurations include a `Localization Path` display.
 If the topic is active but the trajectory is not visible, set RViz `Fixed
-Frame` to the actual `/orbvi/vio/odometry.header.frame_id` value (normally
+Frame` to the actual `/orbvi/localization/odometry.header.frame_id` value (normally
 `world` for 4V VINS and `camera_init` for 4VL Omni-LIVO).
 For 4V, the current `world → body` and depth `orbvi_link → cameras` branches
 are separate trees: the bridge does not yet connect them using VINS camera/IMU

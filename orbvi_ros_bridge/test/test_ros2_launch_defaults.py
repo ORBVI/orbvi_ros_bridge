@@ -16,12 +16,27 @@ USER_LAUNCHES = (
 
 
 class Ros2LaunchDefaultsTest(unittest.TestCase):
+    def test_rviz_profile_selects_matching_fixed_frame_and_accepts_override(self):
+        filename = str(PACKAGE_ROOT / "launch/ros2/orbvi_ros_bridge_rviz.launch.py")
+        for overrides, expected in (({}, "camera_init"),
+                                    ({"profile": "visual"}, "orbvi_link"),
+                                    ({"profile": "mid360"}, "camera_init"),
+                                    ({"profile": "mid360", "fixed_frame": "odom"}, "odom")):
+            with self.subTest(overrides=overrides):
+                context = LaunchContext()
+                context.launch_configurations.update(overrides)
+                description = PythonLaunchDescriptionSource(filename).get_launch_description(context)
+                for action in description.entities:
+                    if isinstance(action, DeclareLaunchArgument):
+                        action.execute(context)
+                self.assertEqual(context.launch_configurations["fixed_frame"], expected)
+
     def test_tf_defaults_resolve_with_and_without_overrides(self):
         cases = (
             ({}, "true", "true"),
-            ({"publish_vio_tf": "false"}, "false", "false"),
+            ({"publish_localization_tf": "false"}, "false", "false"),
             ({"publish_sensor_tf": "false"}, "true", "false"),
-            ({"publish_vio_tf": "false", "publish_sensor_tf": "true"}, "false", "true"),
+            ({"publish_localization_tf": "false", "publish_sensor_tf": "true"}, "false", "true"),
         )
         for filename in USER_LAUNCHES:
             for overrides, expected_vio, expected_sensor in cases:
@@ -36,7 +51,7 @@ class Ros2LaunchDefaultsTest(unittest.TestCase):
                     for action in description.entities:
                         if isinstance(action, DeclareLaunchArgument):
                             action.execute(context)
-                    self.assertEqual(context.launch_configurations["publish_vio_tf"], expected_vio)
+                    self.assertEqual(context.launch_configurations["publish_localization_tf"], expected_vio)
                     self.assertEqual(context.launch_configurations["publish_sensor_tf"], expected_sensor)
 
 

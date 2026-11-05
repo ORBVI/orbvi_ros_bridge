@@ -57,7 +57,7 @@ def callback(topic,sensor=False):
    write(topic,message);budget+=estimate;counts[topic]=counts.get(topic,0)+1
  return receive
 subs=[]
-for topic,kind,sensor in [('/tf',TFMessage,False),('/tf_static',TFMessage,False),('/orbvi/vio/odometry',Odometry,False),('/orbvi/lidar/custom',CustomMsg,True),('/orbvi/lidar/imu',Imu,True)]+[('/orbvi/raw/camera_%d/image/compressed'%i,CompressedImage,True)for i in(3,2,4,5)]:
+for topic,kind,sensor in [('/tf',TFMessage,False),('/tf_static',TFMessage,False),('/orbvi/localization/odometry',Odometry,False),('/orbvi/lidar/custom',CustomMsg,True),('/orbvi/lidar/imu',Imu,True)]+[('/orbvi/raw/camera_%d/image/compressed'%i,CompressedImage,True)for i in(3,2,4,5)]:
  subs.append(subscribe(topic,kind,callback(topic,sensor)))
 started=time.monotonic()
 started_utc_ns=time.time_ns()
